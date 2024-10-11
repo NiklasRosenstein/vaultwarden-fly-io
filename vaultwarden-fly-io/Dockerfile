@@ -21,8 +21,7 @@ RUN echo 'vaultwarden ALL=(ALL) NOPASSWD:SETENV: /usr/bin/geesefs' >> /etc/sudoe
 WORKDIR /etc/vaultwarden
 COPY entrypoint.sh .
 RUN addgroup -S vaultwarden && adduser -S vaultwarden -G vaultwarden
-RUN mkdir /data && \
-    touch /etc/litestream.yml && \
+RUN touch /etc/litestream.yml && \
     chown -R vaultwarden:vaultwarden /data /etc/vaultwarden /etc/litestream.yml
 USER vaultwarden
 ENTRYPOINT [ "/bin/sh", "/etc/vaultwarden/entrypoint.sh" ]
