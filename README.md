@@ -45,3 +45,10 @@ __System variablse__
 | Variable               | Default | Description                                                                                                                                        |
 |------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | `GEESEFS_MEMORY_LIMIT` | `32`    | The memory limit in MB for GeeseFS mounts. Note that this applies per mount, and there are three mounts (`attachments`, `icon_cache` and `sends`). |
+| `GEESEFS_ENABLED`      | `true`  | If set to `false`, GeeseFS will not be used and related data directories will _not_ be mounted. Use with care, this is for testing only.           |
+
+__Vaultwarden configuration__
+
+| Variable                  | Default       | Description                                                                                                                                                             |
+|---------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `VAULTWARDEN_ADMIN_TOKEN` | n/a, required | Token to enter the Vaultwarden admin panel with. Create it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`, may be stored as a non-secret. |
