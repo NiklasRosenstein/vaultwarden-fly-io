@@ -123,8 +123,13 @@ openssl rsa -in /data/rsa_key.pem -pubout >/data/rsa_key.pub.pem
 VAULTWARDEN_CONFIG_PATH=/data/config.json
 VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
 assert_is_set VAULTWARDEN_ADMIN_TOKEN
+# NOTE: This actually must be set as a variable to enable the admin panel in the first place.
+export ADMIN_TOKEN="${VAULTWARDEN_ADMIN_TOKEN}"
+
 cat <<EOF >$VAULTWARDEN_CONFIG_PATH
 {
+  "log_level": "${VAULTWARDEN_LOG_LEVEL:-info}",
+  "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
   "attachments_folder": /data/files/attachments",
   "icon_cache_folder": /data/files/icon_cache",
   "sends_folder": /data/files/sends_folder",
@@ -155,7 +160,6 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
   "authenticator_disable_time_drift": false,
   "require_device_email": false,
   "reload_templates": false,
-  "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
   "use_sendmail": ${VAULTWARDEN_USE_SENDMAIL:-false},
   "_enable_yubico": ${VAULTWARDEN_ENABLE_YUBICO:-false},
   "_enable_duo": ${VAULTWARDEN_ENABLE_DUO:-false},
