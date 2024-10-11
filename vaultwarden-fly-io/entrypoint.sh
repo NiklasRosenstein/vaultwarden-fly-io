@@ -133,9 +133,9 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
   "log_level": "${VAULTWARDEN_LOG_LEVEL:-info}",
   "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
   "enable_db_wal": true,
-  "attachments_folder": /mnt/s3/attachments",
-  "icon_cache_folder": /mnt/s3/icon_cache",
-  "sends_folder": /mnt/s3/sends_folder",
+  "attachments_folder": "/mnt/s3/attachments",
+  "icon_cache_folder": "/mnt/s3/icon_cache",
+  "sends_folder": "/mnt/s3/sends_folder",
   "domain": "${VAULTWARDEN_DOMAIN}",
   "sends_allowed": ${VAULTWARDEN_SENDS_ALLOWED:-true},
   "hibp_api_key": "${VAULTWARDEN_HIBP_API_KEY:-}",
@@ -209,6 +209,14 @@ EOF
 
 # Prevent writing to the config.json, the admin panel should only serve as point to view settings.
 chmod -w $VAULTWARDEN_CONFIG_PATH
+
+# Validate the JSON file syntax. This is a sanity check that should prevent successful startup if we made a mistake
+# in the JSON snytax, as Vaultwarden will not complain and simply not load the file.
+info "validating $VAULTWARDEN_CONFIG_PATH syntax"
+if ! jq < $VAULTWARDEN_CONFIG_PATH; then
+    error "we made a mistake in $VAULTWARDEN_CONFIG_PATH, please file a bug report"
+    exit 1
+fi
 
 # Check if there is an existing database to import from S3.
 if [ "${IMPORT_DATABASE:-}" = "true" ] && mc find "s3/$BUCKET_NAME/import-db.sqlite" 2> /dev/null > /dev/null; then
