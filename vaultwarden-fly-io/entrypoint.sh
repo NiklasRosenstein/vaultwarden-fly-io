@@ -125,8 +125,6 @@ openssl rsa -in /data/rsa_key.pem -pubout >/data/rsa_key.pub.pem
 VAULTWARDEN_CONFIG_PATH=/data/config.json
 VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
 assert_is_set VAULTWARDEN_ADMIN_TOKEN
-# NOTE: This actually must be set as a variable to enable the admin panel in the first place.
-export ADMIN_TOKEN="${VAULTWARDEN_ADMIN_TOKEN}"
 
 cat <<EOF >$VAULTWARDEN_CONFIG_PATH
 {
@@ -135,7 +133,7 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
   "enable_db_wal": true,
   "attachments_folder": "/mnt/s3/attachments",
   "icon_cache_folder": "/mnt/s3/icon_cache",
-  "sends_folder": "/mnt/s3/sends_folder",
+  "sends_folder": "/mnt/s3/sends",
   "domain": "${VAULTWARDEN_DOMAIN}",
   "sends_allowed": ${VAULTWARDEN_SENDS_ALLOWED:-true},
   "hibp_api_key": "${VAULTWARDEN_HIBP_API_KEY:-}",
@@ -213,7 +211,7 @@ chmod -w $VAULTWARDEN_CONFIG_PATH
 # Validate the JSON file syntax. This is a sanity check that should prevent successful startup if we made a mistake
 # in the JSON snytax, as Vaultwarden will not complain and simply not load the file.
 info "validating $VAULTWARDEN_CONFIG_PATH syntax"
-if ! jq < $VAULTWARDEN_CONFIG_PATH; then
+if ! jq < $VAULTWARDEN_CONFIG_PATH >/dev/null; then
     error "we made a mistake in $VAULTWARDEN_CONFIG_PATH, please file a bug report"
     exit 1
 fi
