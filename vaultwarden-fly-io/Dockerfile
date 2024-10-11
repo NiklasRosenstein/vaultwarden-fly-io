@@ -13,7 +13,7 @@ RUN arch=$(cat /tmp/arch) &&\
     chmod +x geesefs
 
 FROM alpine
-RUN apk add age envsubst fuse sudo
+RUN apk add age envsubst fuse openssl sudo
 COPY --from=ghcr.io/dani-garcia/vaultwarden:1.32.1 /vaultwarden /usr/bin/vaultwarden
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=geesefs /geesefs /usr/bin/geesefs
