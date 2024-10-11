@@ -177,7 +177,7 @@ if [ "${VAULTWARDEN_ENABLE_YUBICO:-false}" = "true" ]; then
 EOF
 fi
 
-cat <<EOF >>/data/config/json
+cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
   "admin_session_lifetime": 20
 }
 EOF
