@@ -106,9 +106,9 @@ if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
     #       (2) This allows GeeseFS to share the same memory limit across all data files served and we only need to
     #           spawn a single GeeseFS process.
     info "setting up S3 mountpoints"
-    mkdir -p /data/files
+    mkdir -p /mnt/s3
     GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-64}
-    info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /data/files
+    info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /mnt/s3
 else
     warn "GeeseFS is disabled, certain data directories are not persisted."
 fi
@@ -130,6 +130,7 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
 {
   "log_level": "${VAULTWARDEN_LOG_LEVEL:-info}",
   "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
+  "enable_db_wal": true,
   "attachments_folder": /data/files/attachments",
   "icon_cache_folder": /data/files/icon_cache",
   "sends_folder": /data/files/sends_folder",
@@ -203,6 +204,9 @@ cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
   "admin_session_lifetime": 20
 }
 EOF
+
+# Prevent writing to the config.json, the admin panel should only serve as point to view settings.
+chmod -w $VAULTWARDEN_CONFIG_PATH
 
 # Check if there is an existing database to import from S3.
 if [ "${IMPORT_DATABASE:-}" = "true" ] && mc find "s3/$BUCKET_NAME/import-db.sqlite" 2> /dev/null > /dev/null; then
