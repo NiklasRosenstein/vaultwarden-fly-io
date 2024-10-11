@@ -21,7 +21,8 @@ COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
 WORKDIR /etc/vaultwarden
 COPY entrypoint.sh .
 RUN addgroup -S vaultwarden && adduser -S vaultwarden -G vaultwarden
-RUN touch /etc/litestream.yml && \
-    chown -R vaultwarden:vaultwarden /etc/vaultwarden /etc/litestream.yml
+RUN mkdir /data && \
+    touch /etc/litestream.yml && \
+    chown -R vaultwarden:vaultwarden /data /etc/vaultwarden /etc/litestream.yml
 USER vaultwarden
 ENTRYPOINT [ "/bin/sh", "/etc/vaultwarden/entrypoint.sh" ]

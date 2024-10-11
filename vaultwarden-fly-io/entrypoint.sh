@@ -90,10 +90,97 @@ EOF
 info "configuring mc"
 mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
 
-if [ "${ENTRYPOINT_DEBUG:-}" = "true" ]; then
-    debug "ENTRYPOINT_DEBUG is set: set -x"
-    set -x
+# Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
+# already encrypts these data files (except for the icon cache, but who cares).
+info "setting up S3 mountpoints"
+mkdir -p /data/attachments /data/icon_cache /data/sends
+info_run geesefs --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/attachments" /data/attachments
+info_run geesefs --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/icon_cache" /data/icon_cache
+info_run geesefs --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/sends" /data/sends
+
+# Write the RSA key that is used to sign authentication tokens.
+info "writing /data/rsa_key.pem and /data/rsa_key.pub.pem"
+assert_is_set VAULTWARDEN_RSA_PRIVATE_KEY
+echo "$VAULTWARDEN_RSA_PRIVATE_KEY" >/data/rsa_key.pem
+openssl rsa -in /data/rsa_key.pem -pubout >/data/rsa_key.pub.pem
+
+# Generate admin configuration from environment variables.
+VAULTWARDEN_CONFIG_PATH=/data/config.json
+VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
+assert_is_set VAULTWARDEN_ADMIN_TOKEN
+cat <<EOF >$VAULTWARDEN_CONFIG_PATH
+{
+  "domain": "${VAULTWARDEN_DOMAIN}",
+  "sends_allowed": ${VAULTWARDEN_SENDS_ALLOWED:-true},
+  "hibp_api_key": "${VAULTWARDEN_HIBP_API_KEY:-}",
+  "incomplete_2fa_time_limit": 3,
+  "disable_icon_download": false,
+  "signups_allowed": ${VAULTWARDEN_SIGNUPS_ALLOWED:-true},
+  "signups_verify": ${VAULTWARDEN_SIGNUPS_VERIFY:-false},
+  "signups_verify_resend_time": ${VAULTWARDEN_SIGNUPS_VERIFY_RESEND_TIME:-3600},
+  "signups_verify_resend_limit": ${VAULTWARDEN_SIGNUPS_VERIFY_RESEND_LIMIT:-6},
+  "invitations_allowed": ${VAULTWARDEN_INVITATIONS_ALLOWED:-true},
+  "emergency_access_allowed": ${VAULTWARDEN_EMERGENCY_ACCESS_ALLOWED:-true},
+  "email_change_allowed": ${VAULTWARDEN_EMAIL_CHANGE_ALLOWED:-true},
+  "password_iterations": ${VAULTWARDEN_PASSWORD_ITERATIONS:-600000},
+  "password_hints_allowed": ${VAULTWARDEN_PASSWORD_HINTS_ALLOWED:-true},
+  "show_password_hint": ${VAULTWARDEN_SHOW_PASSWORD_HINT:-false},
+  "admin_token": "${VAULTWARDEN_ADMIN_TOKEN}",
+  "invitation_org_name": "${VAULTWARDEN_INVITATION_ORG_NAME:-Vaultwarden}",
+  "ip_header": "X-Real-IP",
+  "icon_redirect_code": 302,
+  "icon_cache_ttl": 2592000,
+  "icon_cache_negttl": 259200,
+  "icon_download_timeout": 10,
+  "icon_blacklist_non_global_ips": true,
+  "disable_2fa_remember": ${VAULTWARDEN_DISABLE_2FA_REMEMBER:-false},
+  "authenticator_disable_time_drift": false,
+  "require_device_email": false,
+  "reload_templates": false,
+  "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
+  "use_sendmail": ${VAULTWARDEN_USE_SENDMAIL:-false},
+  "_enable_yubico": ${VAULTWARDEN_ENABLE_YUBICO:-false},
+  "_enable_duo": ${VAULTWARDEN_ENABLE_DUO:-false},
+  "_enable_smtp": ${VAULTWARDEN_ENABLE_SMTP:-false},
+  "_enable_email_2fa": ${VAULTWARDEN_ENABLE_EMAIL_2FA:-${VAULTWARDEN_ENABLE_SMTP:-false}},
+EOF
+
+if [ "${VAULTWARDEN_ENABLE_SMTP:-false}" = "true" ]; then
+    assert_is_set VAULTWARDEN_SMTP_HOST
+    assert_is_set VAULTWARDEN_SMTP_FROM
+    assert_is_set VAULTWARDEN_SMTP_USERNAME
+    assert_is_set VAULTWARDEN_SMTP_PASSWORD
+    cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
+  "smtp_host": "${VAULTWARDEN_SMTP_HOST}",
+  "smtp_security": "${VAULTWARDEN_SMTP_SECURITY:-force_tls}",
+  "smtp_port": "${VAULTWARDEN_SMTP_PORT:-465},
+  "smtp_from": "${VAULTWARDEN_SMTP_FROM}",
+  "smtp_from_name": "${VAULTWARDEN_SMTP_FROM_NAME:-Vaultwarden}",
+  "smtp_username": "${VAULTWARDEN_SMTP_USERNAME}",
+  "smtp_password": "${VAULTWARDEN_SMTP_PASSWORD}",
+  "smtp_timeout": 15,
+  "smtp_embed_images": true,
+  "smtp_accept_invalid_certs": false,
+  "smtp_accept_invalid_hostnames": false,
+  "email_token_size": 6,
+  "email_expiration_time": 600,
+  "email_attempts_limit": 3,
+EOF
 fi
+
+if [ "${VAULTWARDEN_ENABLE_YUBICO:-false}" = "true" ]; then
+    assert_is_set VAULTWARDEN_YUBICO_CLIENT_ID
+    assert_is_set VAULTWARDEN_YUBICO_SECRET_KEY
+    cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
+  "yubico_client_id": "${VAULTWARDEN_YUBICO_CLIENT_ID}",
+  "yubico_secret_key": "${VAULTWARDEN_YUBICO_SECRET_KEY}",
+EOF
+fi
+
+cat <<EOF >>/data/config/json
+  "admin_session_lifetime": 20
+}
+EOF
 
 # Check if there is an existing database to import from S3.
 if [ "${IMPORT_DATABASE:-}" = "true" ] && mc find "s3/$BUCKET_NAME/import-db.sqlite" 2> /dev/null > /dev/null; then
