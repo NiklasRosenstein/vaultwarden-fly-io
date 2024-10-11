@@ -94,9 +94,6 @@ EOF
 info "configuring mc"
 mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
 
-info "contents of /data:"
-ls -lha /data
-
 # Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
 # already encrypts these data files (except for the icon cache, but who cares).
 if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
@@ -108,10 +105,12 @@ if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
     #           target directory is a mount.
     #       (2) This allows GeeseFS to share the same memory limit across all data files served and we only need to
     #           spawn a single GeeseFS process.
+    #       Also, using --uid 100 causes that even root gets permission errors when accessing the directory, so instead
+    #       we do not use this option, keep the file owner as root and run Vaultwarden as root (:sadface:).
     info "setting up S3 mountpoints"
     mkdir -p /mnt/s3
     GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-64}
-    info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /mnt/s3
+    info_run sudo -E geesefs --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /mnt/s3
 else
     warn "GeeseFS is disabled, certain data directories are not persisted."
 fi
@@ -134,9 +133,9 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
   "log_level": "${VAULTWARDEN_LOG_LEVEL:-info}",
   "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
   "enable_db_wal": true,
-  "attachments_folder": /data/files/attachments",
-  "icon_cache_folder": /data/files/icon_cache",
-  "sends_folder": /data/files/sends_folder",
+  "attachments_folder": /mnt/s3/attachments",
+  "icon_cache_folder": /mnt/s3/icon_cache",
+  "sends_folder": /mnt/s3/sends_folder",
   "domain": "${VAULTWARDEN_DOMAIN}",
   "sends_allowed": ${VAULTWARDEN_SENDS_ALLOWED:-true},
   "hibp_api_key": "${VAULTWARDEN_HIBP_API_KEY:-}",
