@@ -94,6 +94,9 @@ EOF
 info "configuring mc"
 mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
 
+info "contents of /data:"
+ls -lha /data
+
 # Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
 # already encrypts these data files (except for the icon cache, but who cares).
 if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
