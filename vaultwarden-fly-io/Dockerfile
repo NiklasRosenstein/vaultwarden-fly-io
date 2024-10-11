@@ -23,4 +23,5 @@ RUN addgroup -S vaultwarden && adduser -S vaultwarden -G vaultwarden
 RUN touch /etc/litestream.yml && \
     chown -R vaultwarden:vaultwarden /data /etc/litestream.yml
 USER vaultwarden
+ENV ROCKET_PORT=8080
 ENTRYPOINT [ "/bin/sh", "/entrypoint.sh" ]
