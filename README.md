@@ -33,3 +33,15 @@ on an ephemeral disk, we need to have an alternative story around the persistenc
 | `/data/rsa_key.pem`           | Written to disk from the `VAULTWARDEN_RSA_PRIVATE_KEY` environment variable. |
 | `/data/rsa_key.pub.pem`       | Auto-generated from the `VAULTWARDEN_RSA_PRIVATE_KEY` environment variable.  |
 | `/data/sends`                 | Mounted to the S3 bucket via [GeeseFS].                                      |
+
+> Note that because we generate the `config.json` from environment variables, modifying it in the Admin UI or
+> organization settings will not work. These settings must be changed from environment variables in your `fly.toml`
+> or via `fly secrets set`.
+
+## Environment variables
+
+__System variablse__
+
+| Variable               | Default | Description                                                                                                                                        |
+|------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GEESEFS_MEMORY_LIMIT` | `32`    | The memory limit in MB for GeeseFS mounts. Note that this applies per mount, and there are three mounts (`attachments`, `icon_cache` and `sends`). |
