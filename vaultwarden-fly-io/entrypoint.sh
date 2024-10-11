@@ -97,12 +97,18 @@ mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_
 # Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
 # already encrypts these data files (except for the icon cache, but who cares).
 if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
+    # NOTE: We configure Vaultwarden from the default data directory paths (e.g. /data/attachments, /data/icon_cache)
+    #       to directories inside /data/files instead, for two reasons:
+    #       (1) Vaultwarden's startup procedure uses std::fs::create_dir_all() which seems to error if the directory
+    #           already exists; I can't explain how this does NOT error when Vaultwarden is run with a persistent
+    #           disk that does not use mounts for these directories, but something behaves differently if the actual
+    #           target directory is a mount.
+    #       (2) This allows GeeseFS to share the same memory limit across all data files served and we only need to
+    #           spawn a single GeeseFS process.
     info "setting up S3 mountpoints"
-    mkdir -p /data/attachments /data/icon_cache /data/sends
-    GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-32}
-    # info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/attachments" /data/attachments
-    # info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/icon_cache" /data/icon_cache
-    # info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/sends" /data/sends
+    mkdir -p /data/files
+    GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-64}
+    info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /data/files
 else
     warn "GeeseFS is disabled, certain data directories are not persisted."
 fi
@@ -119,6 +125,9 @@ VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
 assert_is_set VAULTWARDEN_ADMIN_TOKEN
 cat <<EOF >$VAULTWARDEN_CONFIG_PATH
 {
+  "attachments_folder": /data/files/attachments",
+  "icon_cache_folder": /data/files/icon_cache",
+  "sends_folder": /data/files/sends_folder",
   "domain": "${VAULTWARDEN_DOMAIN}",
   "sends_allowed": ${VAULTWARDEN_SENDS_ALLOWED:-true},
   "hibp_api_key": "${VAULTWARDEN_HIBP_API_KEY:-}",
