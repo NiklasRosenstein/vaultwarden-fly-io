@@ -14,7 +14,7 @@ RUN arch=$(cat /tmp/arch) &&\
 
 FROM alpine
 RUN apk add age envsubst fuse openssl sudo
-COPY --from=ghcr.io/dani-garcia/vaultwarden:1.32.1 /vaultwarden /vaultwarden
+COPY --from=ghcr.io/dani-garcia/vaultwarden:1.32.1-alpine /vaultwarden /usr/bin/vaultwarden
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=geesefs /geesefs /usr/bin/geesefs
 COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
