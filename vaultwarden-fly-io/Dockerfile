@@ -12,9 +12,8 @@ RUN arch=$(cat /tmp/arch) &&\
     wget https://github.com/yandex-cloud/geesefs/releases/download/v0.41.3/geesefs-linux-${arch} -O geesefs && \
     chmod +x geesefs
 
-FROM alpine
+FROM ghcr.io/dani-garcia/vaultwarden:1.32.1-alpine
 RUN apk add age envsubst fuse openssl sudo
-COPY --from=ghcr.io/dani-garcia/vaultwarden:1.32.1-alpine /vaultwarden /usr/bin/vaultwarden
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=geesefs /geesefs /usr/bin/geesefs
 COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
