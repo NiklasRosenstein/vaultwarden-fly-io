@@ -18,10 +18,9 @@ COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=geesefs /geesefs /usr/bin/geesefs
 COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
 RUN echo 'vaultwarden ALL=(ALL) NOPASSWD:SETENV: /usr/bin/geesefs' >> /etc/sudoers
-WORKDIR /etc/vaultwarden
 COPY entrypoint.sh .
 RUN addgroup -S vaultwarden && adduser -S vaultwarden -G vaultwarden
 RUN touch /etc/litestream.yml && \
-    chown -R vaultwarden:vaultwarden /data /etc/vaultwarden /etc/litestream.yml
+    chown -R vaultwarden:vaultwarden /data /etc/litestream.yml
 USER vaultwarden
-ENTRYPOINT [ "/bin/sh", "/etc/vaultwarden/entrypoint.sh" ]
+ENTRYPOINT [ "/bin/sh", "/entrypoint.sh" ]
