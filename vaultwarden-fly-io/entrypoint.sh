@@ -196,7 +196,7 @@ maybe_idle
 # Run Vaultwarden.
 export I_REALLY_WANT_VOLATILE_STORAGE=true
 if [ "${LITESTREAM_ENABLED:-true}" = "true" ]; then
-    info_run exec litestream replicate -exec "vaultwarden"
+    info_run exec litestream replicate -exec "/vaultwarden"
 else
-    info_run exec vaultwarden
+    info_run exec /vaultwarden
 fi
