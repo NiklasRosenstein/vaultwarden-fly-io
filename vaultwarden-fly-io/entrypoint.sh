@@ -95,9 +95,9 @@ mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_
 info "setting up S3 mountpoints"
 mkdir -p /data/attachments /data/icon_cache /data/sends
 GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-32}
-info_run sudo -E geesefs --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/attachments" /data/attachments
-info_run sudo -E geesefs --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/icon_cache" /data/icon_cache
-info_run sudo -E geesefs --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/sends" /data/sends
+info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/attachments" /data/attachments
+info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/icon_cache" /data/icon_cache
+info_run sudo -E geesefs --uid 100 --gid 100 --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/sends" /data/sends
 
 # Write the RSA key that is used to sign authentication tokens.
 info "writing /data/rsa_key.pem and /data/rsa_key.pub.pem"
