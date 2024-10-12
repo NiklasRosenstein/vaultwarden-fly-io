@@ -1,0 +1,40 @@
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "CHANGE_ME"
+primary_region = "fra"
+swap_size_mb = 128
+
+[build]
+  image = "ghcr.io/niklasrosenstein/vaultwarden-fly-io:0.1.0-vaultwarden-1.32.1"
+
+[deploy]
+  strategy = "immediate"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+
+[env]
+  VAULTWARDEN_DOMAIN = "https://vault.example.com"
+  # ABSOLUTELY CHANGE THIS. This is "foobar32"
+  VAULTWARDEN_ADMIN_TOKEN = "$argon2id$v=19$m=65540,t=3,p=4$J31dvyOAsiYidrMZlZfSQ2za+0mutshB8cTXbNeJ4kA$FoNh4n/wF89n5VBpty+VPzK6GUxr4eWCpPG77JfUkt4"
+  # VAULTWARDEN_ENABLE_YUBICO = "true"
+  # VAULTWARDEN_YUBICO_CLIENT_ID = "..."
+  # VAULTWARDEN_ENABLE_SMTP = "true"
+  # VAULTWARDEN_SMTP_HOST = "smtp.gmail.com"
+  # VAULTWARDEN_SMTP_FROM = "..."
+  # VAULTWARDEN_SMTP_USERNAME = "..."
