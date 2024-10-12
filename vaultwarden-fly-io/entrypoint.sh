@@ -176,7 +176,7 @@ if [ "${VAULTWARDEN_ENABLE_SMTP:-false}" = "true" ]; then
     cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
   "smtp_host": "${VAULTWARDEN_SMTP_HOST}",
   "smtp_security": "${VAULTWARDEN_SMTP_SECURITY:-force_tls}",
-  "smtp_port": "${VAULTWARDEN_SMTP_PORT:-465},
+  "smtp_port": ${VAULTWARDEN_SMTP_PORT:-465},
   "smtp_from": "${VAULTWARDEN_SMTP_FROM}",
   "smtp_from_name": "${VAULTWARDEN_SMTP_FROM_NAME:-Vaultwarden}",
   "smtp_username": "${VAULTWARDEN_SMTP_USERNAME}",
