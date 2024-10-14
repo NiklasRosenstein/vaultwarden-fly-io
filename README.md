@@ -1,3 +1,7 @@
+<p align="center">
+    <img src="./.github/assets/vaultwarden-on-flyio.webp">
+</p>
+
 # Vaultwarden on Fly.io
 
 Run [Vaultwarden] on [Fly.io] with reliable [Litestream] SQlite replication and attachments/sends stored in S3.
