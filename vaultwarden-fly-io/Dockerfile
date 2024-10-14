@@ -17,12 +17,12 @@ RUN apk add age envsubst fuse jq openssl sudo
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=geesefs /geesefs /usr/bin/geesefs
 COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
-RUN echo 'vaultwarden ALL=(ALL) NOPASSWD:SETENV: /usr/bin/geesefs' >> /etc/sudoers
 COPY entrypoint.sh .
 
 # NOTE: I tried to make this work, but mounting a directory with GeeseFS and using the --uid option seems to break
 #       filesystem permissions for the mounted directory entirely (not just the vaultwarden user, even root gets
 #       permission denied errors). So, we run Vaultwarden as root as it can access the GeeseFS mount properly..
+#RUN echo 'vaultwarden ALL=(ALL) NOPASSWD:SETENV: /usr/bin/geesefs' >> /etc/sudoers
 #RUN addgroup -S vaultwarden && adduser -S vaultwarden -G vaultwarden
 #RUN mkdir /mnt/s3 && \
 #    touch /etc/litestream.yml && \
