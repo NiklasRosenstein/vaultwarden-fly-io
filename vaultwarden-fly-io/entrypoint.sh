@@ -189,6 +189,10 @@ validate_config() {
 }
 
 main() {
+  mount_s3
+  write_rsa_key
+  write_config
+  validate_config
   maybe_idle
   export I_REALLY_WANT_VOLATILE_STORAGE=true
   export LITESTREAM_DATABASE_PATH=/data/db.sqlite3
