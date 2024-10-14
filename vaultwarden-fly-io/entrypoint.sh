@@ -2,103 +2,67 @@
 
 set -eu
 
-debug() {
-    >&2 echo "[ entrypoint - DEBUG ]" "$@"
-}
+#
+# Utility functions
+#
 
 info() {
-    >&2 echo "[ entrypoint - INFO ]" "$@"
+  >&2 echo "[$0 |  INFO]:" "$@"
 }
 
 warn() {
-    >&2 echo "[ entrypoint - WARN ]" "$@"
+  >&2 echo "[$0 |  WARN]:" "$@"
 }
 
 error() {
-    >&2 echo "[ entrypoint - ERROR ]" "$@"
+  >&2 echo "[$0 | ERROR]:" "$@"
 }
 
 info_run() {
-    info "$@"
-    "$@"
+  info "$@"
+  "$@"
 }
 
 assert_is_set() {
-    eval "val=\${$1+x}"
-    if [ -z "$val" ]; then
-        error "missing expected environment variable \"$1\""
-        exit 1
-    fi
+  eval "val=\${$1+x}"
+  if [ -z "$val" ]; then
+    error "missing expected environment variable \"$1\""
+    exit 1
+  fi
 }
 
 assert_file_exists() {
-    if [ ! -f "$1" ]; then
-        error "missing expected file \"$1\""
-        exit 1
-    fi
+  if [ ! -f "$1" ]; then
+    error "missing expected file \"$1\""
+    exit 1
+  fi
 }
 
 maybe_idle() {
-    if [ "${ENTRYPOINT_IDLE:-false}" = "true" ]; then
-        info "ENTRYPOINT_IDLE=true, entering idle state"
-        sleep infinity
-    fi
+  if [ "${ENTRYPOINT_IDLE:-false}" = "true" ]; then
+    info "ENTRYPOINT_IDLE=true, entering idle state"
+    sleep infinity
+  fi
 }
 
 on_error() {
-    [ $? -eq 0 ] && exit
-    error "an unexpected error occurred."
-    maybe_idle
+  [ $? -eq 0 ] && exit
+  error "an unexpected error occurred."
+  maybe_idle
 }
 
 trap 'on_error' EXIT
 
-VAULTWARDEN_DB_PATH=/data/db.sqlite3
+#
+# Business logic
+#
 
-# These should be available automatically simply by enabling the Fly.io Tigris object storage extension.
-assert_is_set AWS_ACCESS_KEY_ID
-assert_is_set AWS_SECRET_ACCESS_KEY
-assert_is_set AWS_REGION
-assert_is_set AWS_ENDPOINT_URL_S3
-assert_is_set BUCKET_NAME
-assert_is_set AGE_SECRET_KEY
+VAULTWARDEN_CONFIG_PATH=/data/config.json
 
-export LITESTREAM_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
-export LITESTREAM_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-AGE_PUBLIC_KEY="$(echo "$AGE_SECRET_KEY" | age-keygen -y)"
-
-info "generating /etc/litestream.yml"
-cat <<EOF >/etc/litestream.yml
-dbs:
-- path: "${VAULTWARDEN_DB_PATH}"
-  replicas:
-  # See https://litestream.io/reference/config/#s3-replica
-  - type: s3
-    bucket: $BUCKET_NAME
-    path: vaultwarden.db
-    region: $AWS_REGION
-    endpoint: $AWS_ENDPOINT_URL_S3
-    # See https://litestream.io/reference/config/#replica-settings
-    sync-interval: "${LITESTREAM_SYNC_INTERVAL:-10s}"
-    # See https://litestream.io/reference/config/#encryption
-    age:
-      identities:
-      - "$AGE_SECRET_KEY"
-      recipients:
-      - "$AGE_PUBLIC_KEY"
-    # See https://litestream.io/reference/config/#retention-period
-    retention: "${LITESTREAM_RETENTION:-24h}"
-    retention-check-interval: "${LITESTREAM_RETENTION_CHECK_INTERVAL:-1h}"
-    # https://litestream.io/reference/config/#validation-interval
-    validation-interval: "${LITESTREAM_VALIDATION_INTERVAL:-12h}"
-EOF
-
-info "configuring mc"
-mc alias set s3 "$AWS_ENDPOINT_URL_S3" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"
-
-# Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
-# already encrypts these data files (except for the icon cache, but who cares).
-if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
+mount_s3() {
+  # Mount data directories that should be stored in S3. Note that we do not need to use SSE-C because Vaultwarden
+  # already encrypts these data files (except for the icon cache, but who cares).
+  if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
     # NOTE: We configure Vaultwarden from the default data directory paths (e.g. /data/attachments, /data/icon_cache)
     #       to directories inside /data/files instead, for two reasons:
     #       (1) Vaultwarden's startup procedure uses std::fs::create_dir_all() which seems to error if the directory
@@ -113,22 +77,25 @@ if [ "${GEESEFS_ENABLED:-true}" = "true" ]; then
     mkdir -p /mnt/s3
     GEESEFS_MEMORY_LIMIT=${GEESEFS_MEMORY_LIMIT:-64}
     info_run sudo -E geesefs --memory-limit "$GEESEFS_MEMORY_LIMIT" --endpoint "$AWS_ENDPOINT_URL_S3" "$BUCKET_NAME:data/" /mnt/s3
-else
+  else
     warn "GeeseFS is disabled, certain data directories are not persisted."
-fi
+  fi
+}
 
-# Write the RSA key that is used to sign authentication tokens.
-info "writing /data/rsa_key.pem and /data/rsa_key.pub.pem"
-assert_is_set VAULTWARDEN_RSA_PRIVATE_KEY
-echo "$VAULTWARDEN_RSA_PRIVATE_KEY" >/data/rsa_key.pem
-openssl rsa -in /data/rsa_key.pem -pubout >/data/rsa_key.pub.pem
+write_rsa_key() {
+  # Write the RSA key that is used to sign authentication tokens.
+  info "writing /data/rsa_key.pem and /data/rsa_key.pub.pem"
+  assert_is_set VAULTWARDEN_RSA_PRIVATE_KEY
+  echo "$VAULTWARDEN_RSA_PRIVATE_KEY" >/data/rsa_key.pem
+  openssl rsa -in /data/rsa_key.pem -pubout >/data/rsa_key.pub.pem
+}
 
-# Generate admin configuration from environment variables.
-VAULTWARDEN_CONFIG_PATH=/data/config.json
-VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
-assert_is_set VAULTWARDEN_ADMIN_TOKEN
+write_config() {
+  # Generate admin configuration from environment variables.
+  VAULTWARDEN_DOMAIN="${VAULTWARDEN_DOMAIN:-https://${FLY_APP_NAME}.fly.dev}"
+  assert_is_set VAULTWARDEN_ADMIN_TOKEN
 
-cat <<EOF >$VAULTWARDEN_CONFIG_PATH
+  cat <<EOF >$VAULTWARDEN_CONFIG_PATH
 {
   "log_level": "${VAULTWARDEN_LOG_LEVEL:-info}",
   "log_timestamp_format": "%Y-%m-%d %H:%M:%S.%3f",
@@ -170,7 +137,7 @@ cat <<EOF >$VAULTWARDEN_CONFIG_PATH
   "_enable_email_2fa": ${VAULTWARDEN_ENABLE_EMAIL_2FA:-${VAULTWARDEN_ENABLE_SMTP:-false}},
 EOF
 
-if [ "${VAULTWARDEN_ENABLE_SMTP:-false}" = "true" ]; then
+  if [ "${VAULTWARDEN_ENABLE_SMTP:-false}" = "true" ]; then
     assert_is_set VAULTWARDEN_SMTP_HOST
     assert_is_set VAULTWARDEN_SMTP_FROM
     assert_is_set VAULTWARDEN_SMTP_USERNAME
@@ -191,47 +158,41 @@ if [ "${VAULTWARDEN_ENABLE_SMTP:-false}" = "true" ]; then
   "email_expiration_time": 600,
   "email_attempts_limit": 3,
 EOF
-fi
+  fi
 
-if [ "${VAULTWARDEN_ENABLE_YUBICO:-false}" = "true" ]; then
+  if [ "${VAULTWARDEN_ENABLE_YUBICO:-false}" = "true" ]; then
     assert_is_set VAULTWARDEN_YUBICO_CLIENT_ID
     assert_is_set VAULTWARDEN_YUBICO_SECRET_KEY
     cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
   "yubico_client_id": "${VAULTWARDEN_YUBICO_CLIENT_ID}",
   "yubico_secret_key": "${VAULTWARDEN_YUBICO_SECRET_KEY}",
 EOF
-fi
+  fi
 
-cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
+  cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
   "admin_session_lifetime": 20
 }
 EOF
 
-# Prevent writing to the config.json, the admin panel should only serve as point to view settings.
-chmod -w $VAULTWARDEN_CONFIG_PATH
+  # Prevent writing to the config.json, the admin panel should only serve as point to view settings.
+  chmod -w $VAULTWARDEN_CONFIG_PATH
+}
 
-# Validate the JSON file syntax. This is a sanity check that should prevent successful startup if we made a mistake
-# in the JSON snytax, as Vaultwarden will not complain and simply not load the file.
-info "validating $VAULTWARDEN_CONFIG_PATH syntax"
-if ! jq < $VAULTWARDEN_CONFIG_PATH >/dev/null; then
+validate_config() {
+  # Validate the JSON file syntax. This is a sanity check that should prevent successful startup if we made a mistake
+  # in the JSON snytax, as Vaultwarden will not complain and simply not load the file.
+  info "validating $VAULTWARDEN_CONFIG_PATH syntax"
+  if ! jq < $VAULTWARDEN_CONFIG_PATH >/dev/null; then
     error "we made a mistake in $VAULTWARDEN_CONFIG_PATH, please file a bug report"
     exit 1
-fi
+  fi
+}
 
-# Check if there is an existing database to import from S3.
-if [ "${IMPORT_DATABASE:-}" = "true" ] && mc find "s3/$BUCKET_NAME/import-db.sqlite" 2> /dev/null > /dev/null; then
-    info "found \"import-db.sqlite\" in bucket, importing that database instead of restoring with litestream"
-    mc cp "s3/$BUCKET_NAME/import-db.sqlite" "$VAULTWARDEN_DB_PATH"
-elif [ "${LITESTREAM_ENABLED:-true}" = "true" ]; then
-    info_run litestream restore -if-db-not-exists -if-replica-exists -replica s3 "$VAULTWARDEN_DB_PATH"
-fi
+main() {
+  maybe_idle
+  export I_REALLY_WANT_VOLATILE_STORAGE=true
+  export LITESTREAM_DATABASE_PATH=/data/db.sqlite3
+  info_run exec /litestream-entrypoint.sh "/vaultwarden"
+}
 
-maybe_idle
-
-# Run Vaultwarden.
-export I_REALLY_WANT_VOLATILE_STORAGE=true
-if [ "${LITESTREAM_ENABLED:-true}" = "true" ]; then
-    info_run exec litestream replicate -exec "/vaultwarden"
-else
-    info_run exec /vaultwarden
-fi
+main "$@"
