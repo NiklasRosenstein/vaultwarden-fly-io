@@ -15,7 +15,7 @@ RUN arch=$(cat /tmp/arch) &&\
 FROM ghcr.io/dani-garcia/vaultwarden:1.32.1-alpine
 RUN apk add age envsubst fuse jq openssl sudo
 COPY --from=litestream /litestream /usr/bin/litestream
-COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.0-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
+COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.1-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
 COPY --from=geesefs /geesefs /usr/bin/geesefs
 COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
 COPY entrypoint.sh .

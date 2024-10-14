@@ -195,6 +195,7 @@ main() {
   validate_config
   maybe_idle
   export I_REALLY_WANT_VOLATILE_STORAGE=true
+  export BUCKET_PATH="vaultwarden.db"
   export LITESTREAM_DATABASE_PATH=/data/db.sqlite3
   info_run exec /litestream-entrypoint.sh "/vaultwarden"
 }
