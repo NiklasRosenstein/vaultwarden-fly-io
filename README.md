@@ -10,48 +10,48 @@ Using the smallest VM size on Fly.io (`shared-cpu-1x`) and leveraging the Tigris
 costs approx. 2 USD/mo to run (depending on the region). Small Vaultwarden instances won't see traffic 24/7, so
 you should pay much less because your VM can be stopped for a large portion of the time.
 
-  [Vaultwarden]: https://github.com/dani-garcia/vaultwarden
-  [Fly.io]: https://fly.io/
-  [Litestream]: https://litestream.io/
+[Vaultwarden]: https://github.com/dani-garcia/vaultwarden
+[Fly.io]: https://fly.io/
+[Litestream]: https://litestream.io/
 
 ## Prerequisites
 
-* An account on [Fly.io]
-* The [fly](https://github.com/superfly/flyctl) CLI
-* The [age](https://github.com/FiloSottile/age) CLI
+- An account on [Fly.io]
+- The [fly](https://github.com/superfly/flyctl) CLI
+- The [age](https://github.com/FiloSottile/age) CLI
 
 ## Installation
 
 1. Create a new Fly.io application
 
-    ```
-    $ fly app create <app_name>
-    ```
+   ```
+   $ fly app create <app_name>
+   ```
 
 2. Create an S3 object storage bucket for your app.
 
-    ```
-    $ fly storage create --app <app_name> --name <app_name>
-    ```
+   ```
+   $ fly storage create --app <app_name> --name <app_name>
+   ```
 
 3. Create secrets:
 
-    ```
-    $ fly secrets set \
-        VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
-        AGE_SECRET_KEY="$(age-keygen | tail -n1)"
-    ```
+   ```
+   $ fly secrets set \
+       VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
+       AGE_SECRET_KEY="$(age-keygen | tail -n1)"
+   ```
 
 4. Create an admin password, if you want to use the Vaultwarden admin panel. Note that you cannot make any changes
    to the Vaultwarden configuration via the admin panel, because the `config.json` is built entirely from environment
    variables on startup.
 
-    ```
-    $ docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash
-    ```
+   ```
+   $ docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash
+   ```
 
-    Because the admin password is already hashed, you can set it in your `fly.toml`'s `[env]` section instead
-    of using `fly secrets set`.
+   Because the admin password is already hashed, you can set it in your `fly.toml`'s `[env]` section instead
+   of using `fly secrets set`.
 
 5. Create a copy of `fly.example.toml` and update the `app` name.
 
@@ -59,7 +59,6 @@ you should pay much less because your VM can be stopped for a large portion of t
 
 7. Run `fly scale count 1` (this application does not support high-availability, and by default, the initial
    deployment step sets the machine count to `2`).
-
 
 ## Advanced topics
 
@@ -100,13 +99,13 @@ Fly.io app. And that should be it!
 
 The [Backing up your Vault](https://github.com/dani-garcia/vaultwarden/wiki/Backing-up-your-vault) documentation for
 Vaultwarden explains the purpose of each the files and directories in the `/data` directory. Since we're running
-on an ephemeral disk, we need to have an alternative story around the persistence of these files. This section 
+on an ephemeral disk, we need to have an alternative story around the persistence of these files. This section
 describes how the data that would usually live on a persistent disk survives:
 
-  [GeeseFS]: https://github.com/yandex-cloud/geesefs/
+[GeeseFS]: https://github.com/yandex-cloud/geesefs/
 
 | Path                    | Persistence implementation                                           |
-|-------------------------|----------------------------------------------------------------------|
+| ----------------------- | -------------------------------------------------------------------- |
 | `/data/attachments`     | Re-configured to `/mnt/s3/attachments`.                              |
 | `/data/icon_cache`      | Re-configured to `/mnt/s3/icon_cache`.                               |
 | `/data/sends`           | Re-configured to `/mnt/s3/sends`.                                    |
@@ -124,23 +123,22 @@ is backed up to.
 
 ### Environment variables
 
-__S3 configuration__
+**S3 configuration**
 
 | Variable                | Default       | Description |
-|-------------------------|---------------|-------------|
+| ----------------------- | ------------- | ----------- |
 | `AWS_ACCESS_KEY_ID`     | n/a, required |             |
 | `AWS_SECRET_ACCESS_KEY` | n/a, required |             |
 | `AWS_REGION`            | n/a, required |             |
 | `AWS_ENDPOINT_URL_S3`   | n/a, required |             |
 | `BUCKET_NAME`           | n/a, required |             |
 
-__Secrets__
+**Secrets**
 
-
-__Vaultwarden configuration__
+**Vaultwarden configuration**
 
 | Variable                                  | Default                            | Description                                                                                                                                                             |
-|-------------------------------------------|------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VAULTWARDEN_ADMIN_TOKEN`                 | n/a, required                      | Token to enter the Vaultwarden admin panel with. Create it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`, may be stored as a non-secret. |
 | `VAULTWARDEN_RSA_PRIVATE_KEY`             | n/a, required                      | The RSA 2048-bits private key that Vaultwarden uses to sign JWTs. Generate with `openssl genrsa 2048`. If you change this value, all current JWTs are invalidated.      |
 | `VAULTWARDEN_LOG_LEVEL`                   | `info`                             |                                                                                                                                                                         |
@@ -156,6 +154,8 @@ __Vaultwarden configuration__
 | `VAULTWARDEN_EMAIL_CHANGE_ALLOWED`        | `true`                             |                                                                                                                                                                         |
 | `VAULTWARDEN_PASSWORD_ITERATIONS`         | `600000`                           |                                                                                                                                                                         |
 | `VAULTWARDEN_PASSWORD_HINTS_ALLOWED`      | `true`                             |                                                                                                                                                                         |
+| `VAULTWARDEN_PUSH_INSTALLATION_ID`        | n/a                                | Obtain your installation ID and key here to enable push notifications: https://bitwarden.com/host/                                                                      |
+| `VAULTWARDEN_PUSH_INSTALLATION_KEY`       | n/a                                | Must be set if `VAULTWARDEN_PUSH_INSTALLATION_ID` is set.                                                                                                               |
 | `VAULTWARDEN_SHOW_PASSWORD_HINT`          | `false`                            |                                                                                                                                                                         |
 | `VAULTWARDEN_INVITATION_ORG_NAME`         | `Vaultwarden`                      |                                                                                                                                                                         |
 | `VAULTWARDEN_DISABLE_2FA_REMEMBER`        | `false`                            |                                                                                                                                                                         |
@@ -175,17 +175,17 @@ __Vaultwarden configuration__
 | `VAULTWARDEN_YUBICO_CLIENT_ID`            | n/a, required if Yubico enabled    |                                                                                                                                                                         |
 | `VAULTWARDEN_YUBICO_SECRET_KEY`           | n/a, required if Yubico enabled    |                                                                                                                                                                         |
 
-__GeeseFS variables__
+**GeeseFS variables**
 
 | Variable               | Default | Description                                                                                                                              |
-|------------------------|---------|------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `GEESEFS_ENABLED`      | `true`  | If set to `false`, GeeseFS will not be used and related data directories will _not_ be mounted. Use with care, this is for testing only. |
 | `GEESEFS_MEMORY_LIMIT` | `64`    | The memory limit in MB for GeeseFS.                                                                                                      |
 
-__Litestream variables__
+**Litestream variables**
 
 | Variable                              | Default       | Description                                                                                                                                                                                     |
-|---------------------------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AGE_SECRET_KEY`                      | n/a, required |                                                                                                                                                                                                 |
 | `LITESTREAM_ENABLED`                  | `true`        | Whether to restore and replicate the SQlite database with Litestream. You likely never want to turn this option off, as you will loose your SQlite database on restarts.                        |
 | `LITESTREAM_RETENTION`                | `24h`         | Configure the Litestream retention period. Retention is enforced periodically and can be changed with `LITESTREAM_RETENTION_CHECK_INTERVAL`.                                                    |
@@ -193,9 +193,9 @@ __Litestream variables__
 | `LITESTREAM_VALIDATION_INTERVAL`      | `12h`         | The interval at which Litestream does a separate restore of the database and validates the result vs. the current database.                                                                     |
 | `LITESTREAM_SYNC_INTERVAL`            | `10s`         | Frequency in which frames are pushed to the replica. Note that Litestream's typical default is `1s`, and increasing this frequency can increase storage costs due to higher API request counts. |
 
-__Maintenance variables__
+**Maintenance variables**
 
 | Variable          | Default | Description                                                                                                                                                                                                                                                                      |
-|-------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ----------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENTRYPOINT_IDLE` | `false` | If set to `true`, enter idle mode before launching the application or if an error occurs on startup. Note that Fly.io might stop the machine after a short while.                                                                                                                |
 | `IMPORT_DATABASE` | `false` | If set to `true`, the startup process will check for an `import-db.sqlite` file in the S3 bucket and load that instead of `litestream restore`. Use for migrating from another Vaultwarden instead. Should be turned off immediately after the litestream replication succeeded. |
