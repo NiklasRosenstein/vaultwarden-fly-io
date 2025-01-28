@@ -160,6 +160,14 @@ EOF
 EOF
   fi
 
+  if [ -n "${VAULTWARDEN_PUSH_INSTALLATION_ID:-}" ]; then
+    assert_is_set VAULTWARDEN_PUSH_INSTALLATION_KEY
+    cat <<EOF >>$VAULTWARDEN_CONFIG_PATH
+  "push_installation_id": "${VAULTWARDEN_PUSH_INSTALLATION_ID}",
+  "push_installation_key": "${VAULTWARDEN_PUSH_INSTALLATION_KEY}",
+EOF
+  fi
+
   if [ "${VAULTWARDEN_ENABLE_YUBICO:-false}" = "true" ]; then
     assert_is_set VAULTWARDEN_YUBICO_CLIENT_ID
     assert_is_set VAULTWARDEN_YUBICO_SECRET_KEY
