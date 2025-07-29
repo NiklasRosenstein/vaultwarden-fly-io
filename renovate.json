@@ -7,6 +7,11 @@
     "platformAutomerge": true,
     "packageRules": [
         {
+            "matchDatasources": ["docker"],
+            "matchPackageNames": ["dani-garcia/vaultwarden"],
+            "addLabels": ["vaultwarden-update"]
+        },
+        {
             "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
             "automerge": true
         }

@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'vaultwarden-update')"
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Vaultwarden Version
+        id: get_vaultwarden_version
+        run: |
+          echo "VAULTWARDEN_VERSION=$(grep 'dani-garcia/vaultwarden' vaultwarden-fly-io/Dockerfile | cut -d':' -f2 | cut -d'-' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Create and Push Tag
+        id: create_tag
+        run: |
+          # Get previous project version
+          PREVIOUS_PROJECT_VERSION=$(git describe --tags --abbrev=0 | cut -d'-' -f1)
+          NEW_TAG="$PREVIOUS_PROJECT_VERSION-vaultwarden-${{ steps.get_vaultwarden_version.outputs.VAULTWARDEN_VERSION }}"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/release ${{ steps.create_tag.outputs.NEW_TAG }}
