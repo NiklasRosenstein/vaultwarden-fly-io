@@ -12,7 +12,7 @@ RUN arch=$(cat /tmp/arch) &&\
     wget https://github.com/yandex-cloud/geesefs/releases/download/v0.41.3/geesefs-linux-${arch} -O geesefs && \
     chmod +x geesefs
 
-FROM ghcr.io/dani-garcia/vaultwarden:1.34.1-alpine
+FROM ghcr.io/dani-garcia/vaultwarden:1.34.2-alpine
 RUN apk add age envsubst fuse jq openssl sudo
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.3-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
