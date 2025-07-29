@@ -5,8 +5,9 @@ if [ -n "$(git log "origin/$(git rev-parse --abbrev-ref HEAD)"..HEAD)" ]; then
   exit 1
 fi
 
-LATEST_TAG="$(git describe --tags --abbrev=0)"
-COMMITS="$(git log "$LATEST_TAG..HEAD" --pretty=format:'- %h %s')"
+# Find the previous tag of the same branch (e.g. v0.1.0-vaultwarden-1.2.3 -> v0.1.0-vaultwarden-1.2.2)
+PREVIOUS_TAG="$(git describe --tags --abbrev=0 "$1^" --match "$(echo "$1" | cut -d'-' -f1,2)*")"
+COMMITS="$(git log "$PREVIOUS_TAG..$1" --pretty=format:'- %h %s')"
 
 # Create a release on GitHub
 gh release create "$1" --notes "$COMMITS"
