@@ -6,15 +6,22 @@
     "automergeType": "pr",
     "platformAutomerge": true,
     "dependencyDashboard": true,
+    "dependencyDashboardApproval": false,
     "packageRules": [
         {
             "matchDatasources": ["docker"],
             "matchPackageNames": ["dani-garcia/vaultwarden"],
-            "addLabels": ["vaultwarden-update"]
+            "addLabels": ["vaultwarden-update"],
+            "dependencyDashboardApproval": false
         },
         {
             "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-            "automerge": true
+            "automerge": true,
+            "dependencyDashboardApproval": false
+        },
+        {
+            "matchUpdateTypes": ["major"],
+            "dependencyDashboardApproval": false
         }
     ]
 }
