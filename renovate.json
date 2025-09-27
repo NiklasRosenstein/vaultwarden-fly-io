@@ -5,6 +5,7 @@
     "automerge": true,
     "automergeType": "pr",
     "platformAutomerge": true,
+    "dependencyDashboard": true,
     "packageRules": [
         {
             "matchDatasources": ["docker"],
