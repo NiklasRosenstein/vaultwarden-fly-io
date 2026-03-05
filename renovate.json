@@ -10,7 +10,7 @@
     "packageRules": [
         {
             "matchDatasources": ["docker"],
-            "matchPackageNames": ["dani-garcia/vaultwarden"],
+            "matchPackageNames": ["ghcr.io/dani-garcia/vaultwarden"],
             "addLabels": ["vaultwarden-update"],
             "dependencyDashboardApproval": false
         },
