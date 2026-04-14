@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     if: "github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'vaultwarden-update') || contains(github.event.pull_request.title, 'ghcr.io/dani-garcia/vaultwarden docker tag'))"
     permissions:
+      actions: write
       contents: write
       packages: write
     steps:
@@ -38,3 +39,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./scripts/release ${{ steps.create_tag.outputs.NEW_TAG }}
+
+      - name: Trigger Build workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build.yaml --ref ${{ steps.create_tag.outputs.NEW_TAG }}
