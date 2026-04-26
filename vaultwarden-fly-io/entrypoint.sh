@@ -120,7 +120,7 @@ write_config() {
   "show_password_hint": ${VAULTWARDEN_SHOW_PASSWORD_HINT:-false},
   "admin_token": "${VAULTWARDEN_ADMIN_TOKEN}",
   "invitation_org_name": "${VAULTWARDEN_INVITATION_ORG_NAME:-Vaultwarden}",
-  "ip_header": "X-Real-IP",
+  "ip_header": "${VAULTWARDEN_IP_HEADER:-X-Real-IP}",
   "icon_redirect_code": 302,
   "icon_cache_ttl": 2592000,
   "icon_cache_negttl": 259200,
