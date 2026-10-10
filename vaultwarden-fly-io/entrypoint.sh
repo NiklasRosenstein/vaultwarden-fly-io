@@ -205,6 +205,9 @@ main() {
   export I_REALLY_WANT_VOLATILE_STORAGE=true
   export BUCKET_PATH="vaultwarden.db"
   export LITESTREAM_DATABASE_PATH=/data/db.sqlite3
+  if [ "${BACKUP_ENABLED:-false}" = "true" ]; then
+    info_run exec python3 /backup.py supervise /litestream-entrypoint.sh /vaultwarden
+  fi
   info_run exec /litestream-entrypoint.sh "/vaultwarden"
 }
 

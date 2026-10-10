@@ -8,7 +8,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.11.26"
+          python-version: "3.12"
+      - name: Install development dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+          uv sync --locked --group dev
+      - name: Lint Python
+        run: uv run --no-sync ruff check .
+      - name: Check Python formatting
+        run: uv run --no-sync ruff format --check .
+      - name: Type check Python
+        run: uv run --no-sync python -m mypy
+      - name: Test scheduled backups
+        run: uv run --no-sync python -m unittest discover -s tests -v
+
   docker:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
