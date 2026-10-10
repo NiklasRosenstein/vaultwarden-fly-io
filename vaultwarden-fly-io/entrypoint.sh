@@ -101,6 +101,17 @@ check_s3() {
     warn "s3-monitor: listing /mnt/s3 failed or did not complete within ${GEESEFS_MONITOR_TIMEOUT}s"
     return 1
   fi
+  # Write a small file and fsync it, which makes GeeseFS upload it to S3 right away, then read it back. This catches a
+  # mount that can still serve reads from its cache but can no longer write to the bucket.
+  if [ "$GEESEFS_MONITOR_WRITE_CHECK" = "true" ]; then
+    probe_file="/mnt/s3/.s3-monitor-${FLY_MACHINE_ID:-$(hostname)}"
+    probe_value="$(date +%s)"
+    if ! echo "$probe_value" | timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" dd of="$probe_file" conv=fsync 2>/dev/null \
+      || [ "$(timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" cat "$probe_file" 2>/dev/null)" != "$probe_value" ]; then
+      warn "s3-monitor: writing $probe_file failed or did not complete within ${GEESEFS_MONITOR_TIMEOUT}s"
+      return 1
+    fi
+  fi
   return 0
 }
 
@@ -111,7 +122,7 @@ monitor_s3() {
   main_pid="$1"
   failures=0
   info "s3-monitor: started (interval ${GEESEFS_MONITOR_INTERVAL}s, timeout ${GEESEFS_MONITOR_TIMEOUT}s," \
-    "failure threshold ${GEESEFS_MONITOR_FAILURE_THRESHOLD})"
+    "failure threshold ${GEESEFS_MONITOR_FAILURE_THRESHOLD}, write check ${GEESEFS_MONITOR_WRITE_CHECK})"
   while kill -0 "$main_pid" 2>/dev/null; do
     sleep "$GEESEFS_MONITOR_INTERVAL"
     status=0
@@ -153,6 +164,7 @@ run_main() {
     GEESEFS_MONITOR_INTERVAL=${GEESEFS_MONITOR_INTERVAL:-30}
     GEESEFS_MONITOR_TIMEOUT=${GEESEFS_MONITOR_TIMEOUT:-20}
     GEESEFS_MONITOR_FAILURE_THRESHOLD=${GEESEFS_MONITOR_FAILURE_THRESHOLD:-3}
+    GEESEFS_MONITOR_WRITE_CHECK=${GEESEFS_MONITOR_WRITE_CHECK:-true}
     monitor_s3 "$main_pid" &
     monitor_pid=$!
   fi
