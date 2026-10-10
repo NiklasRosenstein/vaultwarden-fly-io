@@ -252,3 +252,5 @@ python3 -m venv .venv
 
 CI requires lint, formatting, strict type checks, and tests before building the image.
 Use `.venv/bin/ruff format .` to apply formatting. SDK stubs and checking tools are development dependencies only.
+`requirements-dev.txt` locks transitive dependencies; update `requirements-dev.in` and regenerate it with
+`uv pip compile --universal --python-version 3.12 requirements-dev.in -o requirements-dev.txt`.

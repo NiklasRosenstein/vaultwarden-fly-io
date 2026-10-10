@@ -307,8 +307,10 @@ class BackupTests(unittest.TestCase):
         completion = backup.decode_completion(self.destination_client.data[keys[1]])
         self.assertEqual(completion["status"], "degraded")
         self.assertEqual(completion["missing_file_count"], 2)
-        self.assertNotIn("missing_files", completion)
-        self.assertNotIn("cipher/file", json.dumps(completion))
+        raw_completion = self.destination_client.data[keys[1]]
+        self.assertNotIn("missing_files", backup.json_object(raw_completion))
+        self.assertNotIn(b"cipher/file", raw_completion)
+        self.assertNotIn(b"send/file", raw_completion)
         encrypted = self.root / "archive.age"
         encrypted.write_bytes(self.destination_client.data[keys[0]])
         decrypted = subprocess.check_output(
@@ -348,6 +350,14 @@ class BackupTests(unittest.TestCase):
 
     def test_lowercase_send_data(self) -> None:
         self.connection.execute("UPDATE sends SET data=?", ('{"id":"file", "size":4}',))
+        self.connection.commit()
+        self.run_capture()
+        self.assertEqual(len(self.destination_client.puts), 2)
+
+    def test_numeric_send_size_is_preserved(self) -> None:
+        self.connection.execute(
+            "UPDATE sends SET data=?", ('{"Id":"file", "Size":4.0}',)
+        )
         self.connection.commit()
         self.run_capture()
         self.assertEqual(len(self.destination_client.puts), 2)
@@ -530,6 +540,33 @@ class BackupTests(unittest.TestCase):
                 "region": "eu-central-1",
                 "endpoint_url": "https://source.invalid",
             },
+        )
+
+    def test_s3_factory_forwards_only_explicit_credentials(self) -> None:
+        # Ambient source credentials in setUp must not replace destination inputs.
+        with patch("boto3.client") as client:
+            backup.s3_store(
+                bucket="backups",
+                prefix="vaultwarden",
+                access_key="destination",
+                secret_key="secret",
+                region="eu-west-1",
+            )
+        arguments = client.call_args.kwargs
+        self.assertEqual(arguments["aws_access_key_id"], "destination")
+        self.assertEqual(arguments["aws_secret_access_key"], "secret")
+        self.assertIsNone(arguments["aws_session_token"])
+        with patch("boto3.client") as client:
+            backup.s3_store(
+                bucket="backups",
+                prefix="vaultwarden",
+                access_key="destination",
+                secret_key="secret",
+                region="eu-west-1",
+                session_token="destination-token",
+            )
+        self.assertEqual(
+            client.call_args.kwargs["aws_session_token"], "destination-token"
         )
 
     def test_destination_does_not_inherit_source_endpoint(self) -> None:

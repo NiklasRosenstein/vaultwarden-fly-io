@@ -494,7 +494,7 @@ def main(work: Path) -> float:
         for ident, data in db.execute("SELECT uuid, data FROM sends WHERE atype=1"):
             send = {key.lower(): value for key, value in json_object(data).items()}
             size = send["size"]
-            if not isinstance(size, (str, int)):
+            if not isinstance(size, (str, int, float)):
                 raise BackupError("invalid Send file size")
             expected.append((f"sends/{ident}/{json_string(send['id'])}", int(size)))
     LOG.info("capturing files")
