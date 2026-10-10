@@ -933,7 +933,12 @@ class ConfigurationCoverageTests(unittest.TestCase):
         options = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)", entrypoint))
         options.update(re.findall(r"assert_is_set\s+([A-Z][A-Z0-9_]*)", entrypoint))
         # The entrypoint owns these paths rather than accepting them as inputs.
-        options -= {"VAULTWARDEN_CONFIG_PATH", "LITESTREAM_DATABASE_PATH"}
+        options -= {
+            "VAULTWARDEN_CONFIG_PATH",
+            "LITESTREAM_DATABASE_PATH",
+            "S3_MONITOR_FAILED_MARKER",
+            "S3_MONITOR_MC_CONFIG_DIR",
+        }
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),
             set(),

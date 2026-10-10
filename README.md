@@ -182,6 +182,22 @@ is backed up to.
 | ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `GEESEFS_ENABLED`      | `true`  | If set to `false`, GeeseFS will not be used and related data directories will _not_ be mounted. Use with care, this is for testing only. |
 | `GEESEFS_MEMORY_LIMIT` | `64`    | The memory limit in MB for GeeseFS.                                                                                                      |
+| `GEESEFS_MONITOR_ENABLED`           | `true` | Periodically check that `/mnt/s3` still works and restart the machine if it does not (see below). |
+| `GEESEFS_MONITOR_INTERVAL`          | `30`   | Seconds between checks.                                                                           |
+| `GEESEFS_MONITOR_TIMEOUT`           | `20`   | Seconds after which listing `/mnt/s3` is considered hung.                                        |
+| `GEESEFS_MONITOR_FAILURE_THRESHOLD` | `3`    | Number of consecutive failed checks before the mount is considered unrecoverable.                |
+| `GEESEFS_MONITOR_WRITE_CHECK`       | `true` | Also write, fsync and read back a small file (`/mnt/s3/.s3-monitor-<machine id>`) on every check. Each check then makes one S3 upload; set to `false` to only list the directory. |
+
+The S3 monitor runs alongside Vaultwarden. If the GeeseFS process dies or `/mnt/s3` is no longer mounted, or if listing
+`/mnt/s3` (or writing the probe file) fails or hangs for `GEESEFS_MONITOR_FAILURE_THRESHOLD` checks in a row, it logs an
+error, sends `SIGTERM` to Litestream/Vaultwarden (followed by `SIGKILL` after 60 seconds) and the container exits with
+status `1`. Fly.io then restarts the machine according to its restart policy (`on-failure` by default), which mounts the
+bucket again.
+
+Before restarting, the monitor checks that the bucket itself is reachable with `mc`. If it is not (e.g. an outage of the
+S3 provider), the machine is _not_ restarted, since its disk does not survive a restart and Litestream could neither
+upload its pending changes nor restore the database. Vaultwarden keeps serving from the local database, and the restart
+happens once S3 is reachable again and the mount is still broken.
 
 **Litestream variables**
 
