@@ -39,7 +39,7 @@ Vaultwarden encrypts attachments and Sends itself, so the objects are stored wit
 4. Idle here if `ENTRYPOINT_IDLE=true`.
 5. Restore the database with Litestream, or load `import-db.sqlite` if `IMPORT_DATABASE=true`.
 6. Start Vaultwarden under Litestream replication, plus the S3 monitor and the
-   [backup worker](/vaultwarden-fly-io/guides/backups/) if enabled.
+   [backup worker](../../guides/backups/) if enabled.
 
 If a step fails, the entrypoint exits, or idles if `ENTRYPOINT_IDLE=true`, so you can investigate with
 `fly ssh console`.

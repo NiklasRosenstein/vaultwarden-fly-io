@@ -11,7 +11,7 @@ the running application. The optional **recovery backup worker** adds an indepen
 3. adds the configuration and secrets needed for recovery,
 4. encrypts the result with age and uploads it to a **separate** S3 destination.
 
-Vaultwarden keeps serving requests during the capture. To restore an archive, see [Recovery](/vaultwarden-fly-io/guides/recovery/).
+Vaultwarden keeps serving requests during the capture. To restore an archive, see [Recovery](../recovery/).
 
 ## Enable it
 
@@ -42,7 +42,7 @@ Vaultwarden keeps serving requests during the capture. To restore an archive, se
      BACKUP_AGE_RECIPIENT=age1...
    ```
 
-   All options are listed in the [configuration reference](/vaultwarden-fly-io/reference/configuration/#scheduled-recovery-backups).
+   All options are listed in the [configuration reference](../../reference/configuration/#scheduled-recovery-backups).
 
 :::caution[Keep the machine running]
 A stopped Fly Machine can't run backups. To meet the interval, set `min_machines_running = 1` or turn off
@@ -166,6 +166,6 @@ Use exactly one writer per prefix. The worker doesn't provide a distributed lock
 ## What gets captured
 
 The fields captured for recovery are listed explicitly in `RECOVERY_FIELDS` in `vaultwarden-fly-io/backup.py`. Every
-option in the [configuration reference](/vaultwarden-fly-io/reference/configuration/) must either be captured or appear in
+option in the [configuration reference](../../reference/configuration/) must either be captured or appear in
 `RECOVERY_EXCLUSIONS` with a reason, and CI enforces this. The backup destination options and one-time maintenance flags
 are excluded. The worker doesn't export unrelated environment variables and doesn't access a secrets manager.

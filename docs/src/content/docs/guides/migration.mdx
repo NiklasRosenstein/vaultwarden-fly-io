@@ -11,7 +11,7 @@ points at your bucket. Any S3 client works.
 
 <Steps>
 
-1. **Deploy the new instance** by following the [installation guide](/vaultwarden-fly-io/getting-started/installation/).
+1. **Deploy the new instance** by following the [installation guide](../../getting-started/installation/).
 
 2. **Freeze the old instance.** Nothing may change in the old installation while you migrate. Stop it if you can.
    If you can't stop it without losing access to its files (in Kubernetes, for example), checkpoint the WAL so
@@ -55,7 +55,7 @@ points at your bucket. Any S3 client works.
 
 7. **Carry over your settings.** Look through the old `config.json` and environment, and set the matching
    `VAULTWARDEN_*` variables or secrets on the Fly.io app. See the
-   [configuration reference](/vaultwarden-fly-io/reference/configuration/).
+   [configuration reference](../../reference/configuration/).
 
 </Steps>
 

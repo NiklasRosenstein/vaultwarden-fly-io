@@ -4,7 +4,10 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
 	site: 'https://niklasrosenstein.github.io',
-	base: '/vaultwarden-fly-io',
+	// Pull request previews are served from a subdirectory, see .github/workflows/docs.yaml.
+	base: process.env.DOCS_BASE || '/vaultwarden-fly-io',
+	// GitHub Pages serves this site from a branch, where Jekyll would drop directories starting with "_".
+	build: { assets: 'assets' },
 	integrations: [
 		starlight({
 			title: 'Vaultwarden on Fly.io',

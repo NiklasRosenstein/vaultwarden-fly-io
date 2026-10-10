@@ -112,7 +112,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GEESEFS_MONITOR_ENABLED` | `true` | Restart the machine when `/mnt/s3` stops working. See [how the monitor works](/vaultwarden-fly-io/reference/architecture/#s3-mount-monitor). |
+| `GEESEFS_MONITOR_ENABLED` | `true` | Restart the machine when `/mnt/s3` stops working. See [how the monitor works](../architecture/#s3-mount-monitor). |
 | `GEESEFS_MONITOR_INTERVAL` | `30` | Seconds between checks. |
 | `GEESEFS_MONITOR_TIMEOUT` | `20` | Seconds after which a check is considered hung. |
 | `GEESEFS_MONITOR_FAILURE_THRESHOLD` | `3` | Consecutive failed checks before the mount is considered broken. |
@@ -120,7 +120,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 
 ## Scheduled recovery backups
 
-See the [backups guide](/vaultwarden-fly-io/guides/backups/) for how these fit together.
+See the [backups guide](../../guides/backups/) for how these fit together.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -142,5 +142,5 @@ See the [backups guide](/vaultwarden-fly-io/guides/backups/) for how these fit t
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `IMPORT_DATABASE` | `false` | Load `import-db.sqlite` from the bucket instead of running `litestream restore`. Used for [migrations](/vaultwarden-fly-io/guides/migration/). Turn it off as soon as replication has succeeded. |
+| `IMPORT_DATABASE` | `false` | Load `import-db.sqlite` from the bucket instead of running `litestream restore`. Used for [migrations](../../guides/migration/). Turn it off as soon as replication has succeeded. |
 | `ENTRYPOINT_IDLE` | `false` | Idle before starting the application, or when startup fails, so you can `fly ssh console` in to debug. Fly.io may stop the machine after a while. |

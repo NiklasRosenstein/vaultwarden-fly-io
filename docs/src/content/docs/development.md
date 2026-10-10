@@ -32,14 +32,16 @@ Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. Run `uv l
 installs its runtime dependencies from Alpine packages.
 
 :::tip[Adding an environment variable]
-Every variable documented in the [configuration reference](/vaultwarden-fly-io/reference/configuration/) must be
+Every variable documented in the [configuration reference](../reference/configuration/) must be
 listed in `RECOVERY_FIELDS` or `RECOVERY_EXCLUSIONS` in `backup.py`. A test parses the tables on that page to check
 this.
 :::
 
 ## Documentation
 
-The site is built with Astro Starlight and deployed to GitHub Pages on every push to `main`.
+The site is built with Astro Starlight and published to GitHub Pages from the `gh-pages` branch on every push to
+`main`. Each pull request that touches `docs/` gets a preview under `pr-preview/pr-<number>/`, linked from a sticky
+comment on the pull request and removed when it is closed.
 
 ```sh
 cd docs
@@ -47,7 +49,8 @@ npm ci
 npm run dev
 ```
 
-Pages are in `docs/src/content/docs/`.
+Pages are in `docs/src/content/docs/`. Link between pages with relative paths (`../guides/backups/`), so the links
+also work in previews.
 
 ## Releases
 

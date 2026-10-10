@@ -16,7 +16,7 @@ attach a volume. Instead of a volume, the image keeps all state in an S3 bucket 
 - **Configuration and keys** come from environment variables and Fly secrets, so the machine holds nothing that
   can't be rebuilt.
 
-See [Architecture](/vaultwarden-fly-io/reference/architecture/) for the details.
+See [Architecture](../../reference/architecture/) for the details.
 
 ## Cost
 
