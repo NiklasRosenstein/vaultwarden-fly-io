@@ -1,0 +1,60 @@
+---
+title: Vaultwarden on Fly.io
+description: Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted scheduled backups.
+template: splash
+hero:
+  tagline: Your own Bitwarden-compatible password manager on a tiny Fly Machine, for about 2 USD a month. SQLite is replicated to S3 by Litestream, so the VM itself is disposable.
+  image:
+    file: ../../assets/vaultwarden-on-flyio.webp
+  actions:
+    - text: Get started
+      link: getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/NiklasRosenstein/vaultwarden-fly-io
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## Why this setup?
+
+<CardGrid>
+	<Card title="Cheap to run" icon="star">
+		The smallest `shared-cpu-1x` VM costs about 2 USD a month, and Fly.io stops it when nobody uses it. On a personal
+		account, Fly.io has so far waived invoices under 5 USD. Storage and requests usually fit Tigris's free tier.
+	</Card>
+	<Card title="No volumes" icon="seti:db">
+		The SQLite database is restored from S3 on boot and continuously replicated back with
+		[Litestream](https://litestream.io/), encrypted with [age](https://github.com/FiloSottile/age).
+	</Card>
+	<Card title="Attachments in S3" icon="document">
+		Attachments, Sends and the icon cache live in the same bucket, mounted with
+		[GeeseFS](https://github.com/yandex-cloud/geesefs).
+	</Card>
+	<Card title="Configuration as code" icon="setting">
+		Vaultwarden's `config.json` is built from environment variables on every start. Your `fly.toml` holds the
+		whole configuration.
+	</Card>
+	<Card title="Self-healing storage" icon="approve-check">
+		A monitor watches the S3 mount and restarts the machine when the mount breaks. It holds off while the S3
+		provider itself is down.
+	</Card>
+	<Card title="Scheduled backups" icon="laptop">
+		An optional worker writes age-encrypted, self-contained archives of your vault to a separate bucket on a
+		schedule.
+	</Card>
+</CardGrid>
+
+## Where to go next
+
+<CardGrid>
+	<LinkCard title="Installation" description="Deploy your first instance in seven steps." href="getting-started/installation/" />
+	<LinkCard title="Migrate an existing instance" description="Bring your database, keys and attachments along." href="guides/migration/" />
+	<LinkCard title="Configuration reference" description="Every environment variable the image understands." href="reference/configuration/" />
+	<LinkCard title="Cost model" description="Napkin math for Fly.io and S3 request costs." href="reference/costs/" />
+	<LinkCard title="Docker and Kubernetes" description="Run the same image anywhere FUSE is available." href="guides/kubernetes/" />
+	<LinkCard title="How it works" description="Where each file in /data actually lives." href="reference/architecture/" />
+</CardGrid>

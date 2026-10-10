@@ -1,0 +1,134 @@
+/*
+ * Vaultwarden on Fly.io — theme.
+ * A blue (Vaultwarden) to violet (Fly.io) palette on top of Starlight's defaults.
+ */
+
+:root {
+	--sl-font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--sl-font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+
+	--brand-blue: #3b82f6;
+	--brand-violet: #8b5cf6;
+	--brand-gradient: linear-gradient(120deg, var(--brand-blue), var(--brand-violet));
+
+	/* Dark mode (default) */
+	--sl-color-accent-low: #1e1b4b;
+	--sl-color-accent: #6d6af5;
+	--sl-color-accent-high: #c7d2fe;
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #e8eaf2;
+	--sl-color-gray-2: #c3c7d9;
+	--sl-color-gray-3: #8d93ad;
+	--sl-color-gray-4: #575d78;
+	--sl-color-gray-5: #363b52;
+	--sl-color-gray-6: #22263a;
+	--sl-color-black: #12141f;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #e0e7ff;
+	--sl-color-accent: #4f46e5;
+	--sl-color-accent-high: #312e81;
+	--sl-color-white: #12141f;
+	--sl-color-gray-1: #22263a;
+	--sl-color-gray-2: #363b52;
+	--sl-color-gray-3: #575d78;
+	--sl-color-gray-4: #8d93ad;
+	--sl-color-gray-5: #c3c7d9;
+	--sl-color-gray-6: #eceef6;
+	--sl-color-gray-7: #f6f7fb;
+	--sl-color-black: #ffffff;
+}
+
+/* Header: subtle frosted glass with a gradient hairline. */
+header.header {
+	backdrop-filter: blur(10px);
+	background-color: color-mix(in srgb, var(--sl-color-bg-nav) 82%, transparent);
+	border-bottom: 1px solid transparent;
+	border-image: var(--brand-gradient) 1;
+}
+
+.site-title {
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+/* Headings */
+.sl-markdown-content :is(h1, h2, h3) {
+	letter-spacing: -0.02em;
+}
+
+/* Splash page */
+[data-has-hero] .page {
+	background:
+		radial-gradient(60rem 30rem at 85% -5%, color-mix(in srgb, var(--brand-violet) 22%, transparent), transparent 70%),
+		radial-gradient(50rem 28rem at 0% 10%, color-mix(in srgb, var(--brand-blue) 18%, transparent), transparent 70%);
+}
+
+[data-has-hero] header.header {
+	background-color: transparent;
+}
+
+.hero h1 {
+	background: var(--brand-gradient);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	font-weight: 800;
+	letter-spacing: -0.035em;
+}
+
+.hero img {
+	border-radius: 1.25rem;
+	box-shadow:
+		0 30px 60px -20px color-mix(in srgb, var(--brand-violet) 45%, transparent),
+		0 0 0 1px color-mix(in srgb, var(--sl-color-white) 8%, transparent);
+}
+
+.hero .sl-link-button.primary {
+	background: var(--brand-gradient);
+	border: none;
+	color: #fff;
+}
+
+/* Cards: gradient border on hover */
+.card {
+	border-radius: 0.875rem;
+	transition:
+		transform 150ms ease,
+		box-shadow 150ms ease,
+		border-color 150ms ease;
+}
+
+.card:hover {
+	transform: translateY(-2px);
+	border-color: var(--sl-color-accent);
+	box-shadow: 0 12px 30px -16px color-mix(in srgb, var(--brand-violet) 60%, transparent);
+}
+
+.card .icon {
+	background: var(--brand-gradient) !important;
+	color: #fff !important;
+}
+
+/* Tables: denser, with a tinted header, for the long configuration reference. */
+.sl-markdown-content table {
+	font-size: var(--sl-text-sm);
+	border-radius: 0.5rem;
+}
+
+.sl-markdown-content th {
+	background-color: var(--sl-color-gray-6);
+}
+
+.sl-markdown-content td:first-child code {
+	white-space: nowrap;
+	color: var(--sl-color-accent-high);
+}
+
+/* Steps: gradient bullets */
+.sl-steps > li::before {
+	background: var(--brand-gradient) !important;
+	color: #fff !important;
+	border: none !important;
+}

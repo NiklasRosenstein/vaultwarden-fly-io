@@ -1,0 +1,69 @@
+---
+title: Cost model
+description: Estimate what an instance costs on Fly.io and Tigris, and which settings move the numbers.
+---
+
+import CostCalculator from '../../../components/CostCalculator.astro';
+
+You pay for the **Fly Machine** that runs Vaultwarden and the **S3 bucket** behind it. Tigris buckets created with
+`fly storage create` are billed on the same Fly.io invoice. For a personal vault both are small, and most of the S3
+bill comes from requests, not storage.
+
+<CostCalculator />
+
+:::note
+Prices are from [Fly.io](https://fly.io/pricing/) and [Tigris](https://www.tigrisdata.com/pricing/) as of October
+2026. Fly.io has so far waived invoices below 5 USD for the personal organization of an account. This is
+[an informal policy](https://community.fly.io/t/does-fly-io-still-waive-5-invoices/25651), not a guarantee, and it
+doesn't apply to other organizations.
+:::
+
+## Fly.io
+
+A `shared-cpu-1x` machine with 256 MB costs about **2 USD a month** running 24/7, depending on the region. With
+auto-stop (the default in `fly.example.toml`) you pay only while it runs.
+
+## Tigris
+
+| Item | Price | Free each month |
+| --- | --- | --- |
+| Storage | 0.02 USD per GB-month | 5 GB |
+| Class A requests (PUT, COPY, POST, LIST) | 0.005 USD per 1,000 | 10,000 |
+| Class B requests (GET, HEAD and others) | 0.0005 USD per 1,000 | 100,000 |
+| DELETE requests, egress | free | |
+
+**Class A requests are the number to watch.** For a machine running all month at the default settings:
+
+| Source | Class A per month |
+| --- | --- |
+| S3 mount monitor, write check (one PUT every 30 s) | 86,400 |
+| S3 mount monitor, listing (when GeeseFS's cache can't answer) | up to 86,400 |
+| Litestream sync (one PUT per interval, only after writes) | typically < 10,000 |
+| Litestream retention checks and daily snapshot | ~2,000 |
+
+To cut the monitor's share, set `GEESEFS_MONITOR_WRITE_CHECK=false` or raise `GEESEFS_MONITOR_INTERVAL`.
+
+## Litestream sync interval
+
+This image syncs every **10 seconds**, where Litestream's default is 1 second. An interval without writes costs
+nothing, so the setting only caps the worst case, a database that changes all the time:
+
+| `LITESTREAM_SYNC_INTERVAL` | Max PUTs per month | Max cost |
+| --- | --- | --- |
+| `1s` (Litestream default) | 2,592,000 | ~13 USD |
+| `10s` (this image) | 259,200 | ~1.30 USD |
+| `60s` | 43,200 | ~0.22 USD |
+
+The price of a longer interval: if the machine dies without shutting down cleanly, the changes since the last sync
+are lost. A normal stop uploads them first.
+
+## Typical totals
+
+| Scenario | Class A per month | Tigris cost |
+| --- | --- | --- |
+| Always on, defaults | ~90,000 to ~185,000 | ~0.40 to ~0.90 USD |
+| Always on, write check off | ~2,000 to ~100,000 | 0 to ~0.45 USD |
+| Auto-stopped, ~2 hours a day | ~8,000 to ~15,000 | 0 to ~0.03 USD |
+
+[Scheduled backups](../../guides/backups/) add a few thousand requests a month. Their storage grows with every
+archive you keep, so set a lifecycle rule on the destination bucket.

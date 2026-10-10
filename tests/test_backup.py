@@ -870,10 +870,15 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(stopped.exists())
 
 
-def documented_options(readme: str) -> set[str]:
+CONFIGURATION_REFERENCE = (
+    MODULE.parents[1] / "docs/src/content/docs/reference/configuration.md"
+)
+
+
+def documented_options(page: str) -> set[str]:
     options = set()
     in_table = False
-    for line in readme.splitlines():
+    for line in page.splitlines():
         if not line.strip().startswith("|"):
             in_table = False
             continue
@@ -895,14 +900,14 @@ def documented_options(readme: str) -> set[str]:
 
 class ConfigurationCoverageTests(unittest.TestCase):
     def test_every_documented_option_is_captured_or_explicitly_excluded(self) -> None:
-        documented = documented_options((MODULE.parents[1] / "README.md").read_text())
+        documented = documented_options(CONFIGURATION_REFERENCE.read_text())
         captured = set(backup.RECOVERY_FIELDS)
         excluded = set(backup.RECOVERY_EXCLUSIONS)
         self.assertTrue(documented)
         self.assertEqual(
             documented - captured - excluded,
             set(),
-            "Classify each README option in backup.py",
+            "Classify each documented option in backup.py",
         )
         self.assertEqual(captured & excluded, set())
         self.assertTrue(

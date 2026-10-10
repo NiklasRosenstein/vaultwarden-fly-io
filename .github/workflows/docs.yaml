@@ -1,0 +1,68 @@
+name: Docs
+
+# The site is published from the gh-pages branch: main goes to the root, and every pull request gets a preview under
+# pr-preview/pr-<number>/, linked from a sticky comment and removed when the pull request is closed.
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["docs/**", ".github/workflows/docs.yaml"]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    paths: ["docs/**", ".github/workflows/docs.yaml"]
+  workflow_dispatch:
+
+# Previews and the main deploy all push to gh-pages, so run them one at a time.
+concurrency:
+  group: docs-gh-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Pull requests from forks get a read-only token and can't push a preview.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # for the "Last updated" dates
+
+      - uses: actions/setup-node@v6
+        if: github.event.action != 'closed'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build
+        if: github.event.action != 'closed'
+        env:
+          DOCS_BASE: ${{ github.event_name == 'pull_request' && format('/{0}/pr-preview/pr-{1}', github.event.repository.name, github.event.number) || '' }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy preview
+        if: github.event_name == 'pull_request'
+        uses: rossjrw/pr-preview-action@v1.8.1
+        with:
+          source-dir: docs/dist
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          qr-code: "false"
+
+      - name: Deploy site
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: JamesIves/github-pages-deploy-action@v4.9.0
+        with:
+          folder: docs/dist
+          branch: gh-pages
+          clean-exclude: pr-preview/
+          force: false

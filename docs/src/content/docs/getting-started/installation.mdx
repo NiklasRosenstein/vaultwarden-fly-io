@@ -1,0 +1,91 @@
+---
+title: Installation
+description: Deploy Vaultwarden to Fly.io in a few minutes.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+## Prerequisites
+
+- An account on [Fly.io](https://fly.io/)
+- The [`fly`](https://github.com/superfly/flyctl) CLI, logged in
+- The [`age`](https://github.com/FiloSottile/age) CLI, to generate the database encryption key
+
+## Deploy
+
+<Steps>
+
+1. **Create a Fly.io app.**
+
+   ```sh
+   fly app create <app_name>
+   ```
+
+2. **Create an S3 bucket** for the app. This also sets the `AWS_*` and `BUCKET_NAME` secrets on the app.
+
+   ```sh
+   fly storage create --app <app_name> --name <app_name>
+   ```
+
+3. **Generate the secrets:** the RSA key Vaultwarden signs login tokens with, and the age key that encrypts the
+   Litestream replica.
+
+   ```sh
+   fly secrets set --app <app_name> \
+     VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
+     AGE_SECRET_KEY="$(age-keygen | tail -n1)"
+   ```
+
+   <Aside type="danger">
+   Without `AGE_SECRET_KEY` the database replica can't be decrypted. Store a copy of both secrets somewhere safe,
+   outside Fly.io.
+   </Aside>
+
+4. **Hash an admin token** for the Vaultwarden admin panel.
+
+   ```sh
+   docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash
+   ```
+
+   The output is an Argon2 hash, so you can put it in the `[env]` section of `fly.toml` as
+   `VAULTWARDEN_ADMIN_TOKEN` instead of using `fly secrets set`.
+
+5. **Write your `fly.toml`.** Copy
+   [`fly.example.toml`](https://github.com/NiklasRosenstein/vaultwarden-fly-io/blob/main/fly.example.toml), set
+   `app` and `VAULTWARDEN_DOMAIN`, replace the example admin token, and pin the
+   [latest image release](https://github.com/NiklasRosenstein/vaultwarden-fly-io/pkgs/container/vaultwarden-fly-io).
+
+   ```toml title="fly.toml" {1,5,8-9}
+   app = "<app_name>"
+   primary_region = "fra"
+
+   [build]
+     image = "ghcr.io/niklasrosenstein/vaultwarden-fly-io:<version>"
+
+   [env]
+     VAULTWARDEN_DOMAIN = "https://vault.example.com"
+     VAULTWARDEN_ADMIN_TOKEN = "$argon2id$v=19$m=65540,t=3,p=4$..."
+   ```
+
+6. **Deploy.**
+
+   ```sh
+   fly deploy
+   ```
+
+7. **Scale down to a single machine.** The first deployment creates two machines, but this setup supports only one.
+
+   ```sh
+   fly scale count 1
+   ```
+
+</Steps>
+
+Your vault is now available at `https://<app_name>.fly.dev`, or at your own domain once you have
+[added a certificate](https://fly.io/docs/networking/custom-domain/).
+
+## Next steps
+
+- Turn off public sign-ups once your accounts exist: `VAULTWARDEN_SIGNUPS_ALLOWED = "false"`.
+- Configure SMTP for email verification and invitations. See the [configuration reference](../../reference/configuration/#vaultwarden).
+- Set up [scheduled backups](../../guides/backups/) to a second bucket.
