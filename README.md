@@ -200,3 +200,36 @@ is backed up to.
 | ----------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENTRYPOINT_IDLE` | `false` | If set to `true`, enter idle mode before launching the application or if an error occurs on startup. Note that Fly.io might stop the machine after a short while.                                                                                                                |
 | `IMPORT_DATABASE` | `false` | If set to `true`, the startup process will check for an `import-db.sqlite` file in the S3 bucket and load that instead of `litestream restore`. Use for migrating from another Vaultwarden instead. Should be turned off immediately after the litestream replication succeeded. |
+
+**Scheduled recovery backups**
+
+The optional worker captures the local SQLite database with its online backup API, downloads attachments and sends
+from S3, and includes recovery configuration and credentials. It uploads an Age-encrypted archive to a separate S3
+destination. Vaultwarden keeps running during capture. See [backup operation and recovery](docs/backups.md) for
+the archive format, consistency limits, destination permissions, and restore steps.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BACKUP_ENABLED` | `false` | Enable the supervised backup worker. Requires GeeseFS/S3 file storage. |
+| `BACKUP_BUCKET_NAME` | Required when enabled | Destination bucket, independent of `BUCKET_NAME`. |
+| `BACKUP_PREFIX` | Required when enabled | Application-specific prefix, e.g. `kalix.cluster.rosenstein.app/vaultwarden/`. |
+| `BACKUP_AWS_ACCESS_KEY_ID` | Required when enabled | Destination access key; source credentials are never used as a fallback. |
+| `BACKUP_AWS_SECRET_ACCESS_KEY` | Required when enabled | Destination secret key. |
+| `BACKUP_AWS_SESSION_TOKEN` | Unset | Session token when using temporary destination credentials. Must be refreshed externally. |
+| `BACKUP_AWS_REGION` | Required when enabled | Destination signing region. |
+| `BACKUP_AWS_ENDPOINT_URL_S3` | AWS regional endpoint | Optional endpoint for an S3-compatible destination supporting conditional PUT and SHA-256 checksums. |
+| `BACKUP_AGE_RECIPIENT` | Required when enabled | Recovery public key. Keep its private key outside this deployment and Vaultwarden, separate from the Litestream Age identity. |
+| `BACKUP_INTERVAL_SECONDS` | `3600` | Time between successful capture start timestamps, persisted through S3 completion manifests. |
+| `BACKUP_TIMEOUT_SECONDS` | `1800` | Maximum time per scheduling check/capture/upload attempt. |
+| `BACKUP_MAX_BYTES` | `1073741824` | Maximum captured payload bytes; at most 4 GiB. Archives use a single S3 PUT. |
+| `BACKUP_TMP_DIR` | System temporary directory | Private staging directory parent. Provision at least twice the payload size in free disk space. |
+
+On startup, the worker reads the latest completed backup from S3 and waits until its next due time. It captures
+immediately if no completed backup exists or the interval has elapsed. Failed checks/captures retry with backoff
+without restarting Vaultwarden; an unavailable destination is never treated as an empty backup history. Only one
+capture runs at a time. Keep the application running to meet the interval: a stopped Fly Machine cannot run backups.
+
+Recovery fields are explicitly listed in `vaultwarden-fly-io/backup.py`. Every environment option documented in
+this README must be captured or have a named exclusion with a reason; CI checks this contract. Backup-destination
+options and one-time maintenance flags are excluded. The worker does not export unrelated environment variables
+or access a secrets manager.

@@ -8,7 +8,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y age python3-boto3
+      - name: Test scheduled backups
+        run: /usr/bin/python3 -m unittest discover -s tests -v
+
   docker:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
