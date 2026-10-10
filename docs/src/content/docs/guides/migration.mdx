@@ -1,0 +1,62 @@
+---
+title: Migrate an existing instance
+description: Move the database, signing key and attachments of an existing Vaultwarden installation to Fly.io.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+You can import the data of an existing Vaultwarden installation into a fresh deployment. The examples use the
+[MinIO client](https://min.io/docs/minio/linux/reference/minio-mc.html) (`mc`) with an alias called `tigris` that
+points at your bucket. Any S3 client works.
+
+<Steps>
+
+1. **Deploy the new instance** by following the [installation guide](/vaultwarden-fly-io/getting-started/installation/).
+
+2. **Freeze the old instance.** Nothing may change in the old installation while you migrate. Stop it if you can.
+   If you can't stop it without losing access to its files (in Kubernetes, for example), checkpoint the WAL so
+   that the database file is complete:
+
+   ```sql
+   PRAGMA wal_checkpoint(TRUNCATE);
+   ```
+
+3. **Upload the database** to the bucket under the key `import-db.sqlite`, then deploy with `IMPORT_DATABASE`
+   enabled. On startup the image loads that file instead of running `litestream restore`.
+
+   ```sh
+   mc cp db.sqlite3 tigris/<bucket>/import-db.sqlite
+   fly deploy --env IMPORT_DATABASE=true
+   ```
+
+4. **Check the logs** (`fly logs`). Confirm that the database was imported from the bucket and that Litestream
+   finished replicating it. Then deploy again **without** the flag:
+
+   ```sh
+   fly deploy
+   ```
+
+   <Aside type="caution">
+   Don't leave `IMPORT_DATABASE` enabled. On every restart it would overwrite the live database with the imported
+   snapshot.
+   </Aside>
+
+5. **Copy the RSA signing key**, so existing sessions and tokens stay valid:
+
+   ```sh
+   fly secrets set VAULTWARDEN_RSA_PRIVATE_KEY="$(cat rsa_key.pem)"
+   ```
+
+6. **Copy the attachments and Sends**, and optionally the icon cache, to the `data/` prefix in the bucket:
+
+   ```sh
+   mc cp --recursive attachments sends icon_cache tigris/<bucket>/data/
+   ```
+
+7. **Carry over your settings.** Look through the old `config.json` and environment, and set the matching
+   `VAULTWARDEN_*` variables or secrets on the Fly.io app. See the
+   [configuration reference](/vaultwarden-fly-io/reference/configuration/).
+
+</Steps>
+
+That's it. Log in, open an item with an attachment, and check that it downloads.

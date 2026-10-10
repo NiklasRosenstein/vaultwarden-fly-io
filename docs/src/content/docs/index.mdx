@@ -1,0 +1,58 @@
+---
+title: Vaultwarden on Fly.io
+description: Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted recovery backups.
+template: splash
+hero:
+  tagline: Your own Bitwarden-compatible password manager on a tiny Fly Machine, for about 2 USD a month. SQLite is replicated to S3 by Litestream, so the VM itself is disposable.
+  image:
+    file: ../../assets/vaultwarden-on-flyio.webp
+  actions:
+    - text: Get started
+      link: /vaultwarden-fly-io/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/NiklasRosenstein/vaultwarden-fly-io
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## Why this setup?
+
+<CardGrid>
+	<Card title="Cheap to run" icon="star">
+		The smallest `shared-cpu-1x` VM plus the Tigris free tier costs roughly 2 USD a month. Fly.io stops the machine
+		when nobody uses it, so you often pay less.
+	</Card>
+	<Card title="No volumes" icon="seti:db">
+		The SQLite database is restored from S3 on boot and continuously replicated back with
+		[Litestream](https://litestream.io/), encrypted with [age](https://github.com/FiloSottile/age).
+	</Card>
+	<Card title="Attachments in S3" icon="document">
+		Attachments, Sends and the icon cache live in the same bucket, mounted with
+		[GeeseFS](https://github.com/yandex-cloud/geesefs).
+	</Card>
+	<Card title="Configuration as code" icon="setting">
+		Vaultwarden's `config.json` is built from environment variables on every start. Your `fly.toml` holds the
+		whole configuration.
+	</Card>
+	<Card title="Self-healing storage" icon="approve-check">
+		A monitor watches the S3 mount and restarts the machine when the mount breaks. It holds off while the S3
+		provider itself is down.
+	</Card>
+	<Card title="Recovery backups" icon="laptop">
+		An optional worker writes age-encrypted, self-contained archives of your vault to a separate bucket on a
+		schedule.
+	</Card>
+</CardGrid>
+
+## Where to go next
+
+<CardGrid>
+	<LinkCard title="Installation" description="Deploy your first instance in seven steps." href="/vaultwarden-fly-io/getting-started/installation/" />
+	<LinkCard title="Migrate an existing instance" description="Bring your database, keys and attachments along." href="/vaultwarden-fly-io/guides/migration/" />
+	<LinkCard title="Configuration reference" description="Every environment variable the image understands." href="/vaultwarden-fly-io/reference/configuration/" />
+	<LinkCard title="How it works" description="Where each file in /data actually lives." href="/vaultwarden-fly-io/reference/architecture/" />
+</CardGrid>
