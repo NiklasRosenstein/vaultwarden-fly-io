@@ -82,6 +82,102 @@ mount_s3() {
   fi
 }
 
+S3_MONITOR_FAILED_MARKER=/tmp/s3-monitor-failed
+
+check_s3() {
+  # Returns 0 if the GeeseFS mount at /mnt/s3 looks healthy, 1 if it is degraded (possibly transient) and 2 if it is
+  # definitely broken (GeeseFS process gone or the mount disappeared).
+  if ! pgrep -x geesefs >/dev/null; then
+    error "s3-monitor: geesefs process is not running"
+    return 2
+  fi
+  if ! grep -q " /mnt/s3 fuse" /proc/mounts; then
+    error "s3-monitor: /mnt/s3 is not mounted"
+    return 2
+  fi
+  # Listing the directory goes to S3 once GeeseFS' stat cache expires, so this also catches a broken connection. A dead
+  # FUSE mount can hang indefinitely, hence the timeout.
+  if ! timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" ls /mnt/s3 >/dev/null 2>&1; then
+    warn "s3-monitor: listing /mnt/s3 failed or did not complete within ${GEESEFS_MONITOR_TIMEOUT}s"
+    return 1
+  fi
+  return 0
+}
+
+monitor_s3() {
+  # Periodically check that /mnt/s3 still works. If it looks unrecoverable, terminate the main process (given as $1) so
+  # that the container exits with a non-zero status and Fly.io restarts the machine.
+  trap - EXIT
+  main_pid="$1"
+  failures=0
+  info "s3-monitor: started (interval ${GEESEFS_MONITOR_INTERVAL}s, timeout ${GEESEFS_MONITOR_TIMEOUT}s," \
+    "failure threshold ${GEESEFS_MONITOR_FAILURE_THRESHOLD})"
+  while kill -0 "$main_pid" 2>/dev/null; do
+    sleep "$GEESEFS_MONITOR_INTERVAL"
+    status=0
+    check_s3 || status=$?
+    if [ "$status" -eq 0 ]; then
+      if [ "$failures" -gt 0 ]; then
+        info "s3-monitor: /mnt/s3 recovered after $failures failed check(s)"
+      fi
+      failures=0
+      continue
+    fi
+    failures=$((failures + 1))
+    if [ "$status" -eq 1 ] && [ "$failures" -lt "$GEESEFS_MONITOR_FAILURE_THRESHOLD" ]; then
+      warn "s3-monitor: check failed ($failures/$GEESEFS_MONITOR_FAILURE_THRESHOLD)"
+      continue
+    fi
+    error "s3-monitor: /mnt/s3 looks unrecoverable, terminating to force a restart of the machine"
+    touch "$S3_MONITOR_FAILED_MARKER"
+    kill -TERM "$main_pid" 2>/dev/null || true
+    # Give Litestream a chance to shut down gracefully and push its last frames before we force it.
+    sleep 30
+    kill -KILL "$main_pid" 2>/dev/null || true
+    return
+  done
+}
+
+run_main() {
+  # Run the given command in the background, forwarding termination signals to it, and supervise /mnt/s3 next to it.
+  # We can't just exec the command, as we need to exit with a non-zero status when the S3 monitor kicks in for Fly.io
+  # to restart the machine.
+  rm -f "$S3_MONITOR_FAILED_MARKER"
+  info "$@"
+  "$@" &
+  main_pid=$!
+  trap 'kill -TERM $main_pid 2>/dev/null' INT TERM
+
+  monitor_pid=
+  if [ "${GEESEFS_ENABLED:-true}" = "true" ] && [ "${GEESEFS_MONITOR_ENABLED:-true}" = "true" ]; then
+    GEESEFS_MONITOR_INTERVAL=${GEESEFS_MONITOR_INTERVAL:-30}
+    GEESEFS_MONITOR_TIMEOUT=${GEESEFS_MONITOR_TIMEOUT:-20}
+    GEESEFS_MONITOR_FAILURE_THRESHOLD=${GEESEFS_MONITOR_FAILURE_THRESHOLD:-3}
+    monitor_s3 "$main_pid" &
+    monitor_pid=$!
+  fi
+
+  # `wait` returns early when a trapped signal arrives, so keep waiting until the process has actually exited.
+  status=0
+  wait "$main_pid" || status=$?
+  while kill -0 "$main_pid" 2>/dev/null; do
+    status=0
+    wait "$main_pid" || status=$?
+  done
+  trap - INT TERM
+
+  if [ -n "$monitor_pid" ]; then
+    kill "$monitor_pid" 2>/dev/null || true
+  fi
+  if [ -f "$S3_MONITOR_FAILED_MARKER" ]; then
+    error "exiting because the S3 monitor detected a broken /mnt/s3 mount"
+    trap - EXIT
+    exit 1
+  fi
+  trap - EXIT
+  exit "$status"
+}
+
 write_rsa_key() {
   # Write the RSA key that is used to sign authentication tokens.
   info "writing /data/rsa_key.pem and /data/rsa_key.pub.pem"
@@ -206,9 +302,9 @@ main() {
   export BUCKET_PATH="vaultwarden.db"
   export LITESTREAM_DATABASE_PATH=/data/db.sqlite3
   if [ "${BACKUP_ENABLED:-false}" = "true" ]; then
-    info_run exec python3 /backup.py supervise /litestream-entrypoint.sh /vaultwarden
+    run_main python3 /backup.py supervise /litestream-entrypoint.sh /vaultwarden
   fi
-  info_run exec /litestream-entrypoint.sh "/vaultwarden"
+  run_main /litestream-entrypoint.sh "/vaultwarden"
 }
 
 main "$@"
