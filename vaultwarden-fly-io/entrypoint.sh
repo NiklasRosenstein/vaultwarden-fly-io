@@ -189,8 +189,9 @@ monitor_s3() {
     error "s3-monitor: /mnt/s3 looks unrecoverable, terminating to force a restart of the machine"
     touch "$S3_MONITOR_FAILED_MARKER"
     kill -TERM "$main_pid" 2>/dev/null || true
-    # Give Litestream a chance to shut down gracefully and push its last frames before we force it.
-    sleep 30
+    # Give Litestream a chance to shut down gracefully and push its last frames before we force it. This matches the
+    # time the backup supervisor (backup.py) gives Litestream when it is stopped.
+    sleep 60
     kill -KILL "$main_pid" 2>/dev/null || true
     return
   done

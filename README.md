@@ -190,7 +190,7 @@ is backed up to.
 
 The S3 monitor runs alongside Vaultwarden. If the GeeseFS process dies or `/mnt/s3` is no longer mounted, or if listing
 `/mnt/s3` (or writing the probe file) fails or hangs for `GEESEFS_MONITOR_FAILURE_THRESHOLD` checks in a row, it logs an
-error, sends `SIGTERM` to Litestream/Vaultwarden (followed by `SIGKILL` after 30 seconds) and the container exits with
+error, sends `SIGTERM` to Litestream/Vaultwarden (followed by `SIGKILL` after 60 seconds) and the container exits with
 status `1`. Fly.io then restarts the machine according to its restart policy (`on-failure` by default), which mounts the
 bucket again.
 
