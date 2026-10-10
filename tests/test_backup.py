@@ -51,6 +51,15 @@ class MemoryS3:
                     ]
                 }
 
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys):
+        if self.fail_listing:
+            raise OSError("listing unavailable")
+        return {
+            "Contents": [
+                {"Key": key} for key in sorted(self.data) if key.startswith(Prefix)
+            ][:MaxKeys]
+        }
+
     @staticmethod
     def etag(data):
         return '"' + hashlib.sha256(data).hexdigest() + '"'
@@ -361,6 +370,37 @@ class BackupTests(unittest.TestCase):
                         self.run_capture()
                     self.assertEqual(len(self.destination_client.puts), 2)
 
+    def test_forbidden_archive_head_skips_only_confirmed_missing_archive(self):
+        self.run_capture()
+        archive_key = self.destination_client.puts[0]
+        error = ClientError({"Error": {"Code": "403"}}, "HeadObject")
+        with patch.object(self.destination_client, "head_object", side_effect=error):
+            # An existing but unreadable archive is an access failure.
+            with self.assertRaises(ClientError):
+                backup.latest_capture(self.destination, time.time())
+            # Failed listing cannot establish absence.
+            with patch.object(
+                self.destination_client,
+                "list_objects_v2",
+                side_effect=OSError("offline"),
+            ):
+                with self.assertRaises(OSError):
+                    backup.latest_capture(self.destination, time.time())
+            # Prefix siblings must not be confused with the exact archive key.
+            del self.destination_client.data[archive_key]
+            self.destination_client.data[archive_key + ".other"] = b"unrelated"
+            with patch.object(
+                self.destination_client,
+                "list_objects_v2",
+                wraps=self.destination_client.list_objects_v2,
+            ) as listing:
+                self.assertIsNone(backup.latest_capture(self.destination, time.time()))
+                listing.assert_called_once_with(
+                    Bucket=self.destination.bucket, Prefix=archive_key, MaxKeys=1
+                )
+        self.run_capture()
+        self.assertEqual(len(self.destination_client.puts), 4)
+
     def test_source_download_failure_does_not_publish_degraded_backup(self):
         with patch.object(
             self.source_client, "get_object", side_effect=OSError("offline")
@@ -587,7 +627,11 @@ def documented_options(readme):
         if cell == "Variable":
             in_table = True
             continue
-        if not in_table or re.fullmatch(r":?-+:?", cell):
+        if re.fullmatch(r":?-+:?", cell):
+            continue
+        if not in_table:
+            if re.fullmatch(r"(?:`[A-Z][A-Z0-9_]*`|[A-Z][A-Z0-9_]*)", cell):
+                raise ValueError("Configuration table must have a Variable header")
             continue
         if not re.fullmatch(r"(?:`[A-Z][A-Z0-9_]*`|[A-Z][A-Z0-9_]*)", cell):
             raise ValueError(f"Unrecognized configuration option: {cell!r}")
@@ -620,6 +664,13 @@ class ConfigurationCoverageTests(unittest.TestCase):
         for row in ("**UNCLASSIFIED**", "FOO / BAR", "`UNMATCHED", ""):
             with self.subTest(row=row), self.assertRaises(ValueError):
                 documented_options(header + f"| {row} | | |")
+
+    def test_documentation_parser_rejects_unrecognized_table_headers(self):
+        for header in ("Environment variable", "Option", "**Variable**"):
+            with self.subTest(header=header), self.assertRaises(ValueError):
+                documented_options(
+                    f"| {header} | Default |\n| --- | --- |\n| NEW_OPTION | |"
+                )
 
     def test_entrypoint_recovery_inputs_are_classified(self):
         entrypoint = (MODULE.parent / "entrypoint.sh").read_text()

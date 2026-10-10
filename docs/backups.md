@@ -51,9 +51,10 @@ none is valid. Authentication, network, and service errors fail the scheduling c
 
 The source credentials need ListBucket for `data/attachments/` and `data/sends/`, plus GetObject under those
 prefixes. The destination credentials need ListBucket scoped to `<prefix>/completed/` and `<prefix>/archives/`,
-GetObject for completion manifests and archive HEAD checks, and PutObject under both prefixes. S3 can report a
-missing archive as 403 when listing permission is insufficient; 403 fails the check rather than assuming data loss.
-See [S3 HeadObject permissions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html).
+GetObject for completion manifests and archive HEAD checks, and PutObject under both prefixes. Listing permissions
+must also allow exact archive keys as prefixes (for example `<prefix>/archives/*`). If HEAD returns 403, an exact-prefix
+listing must confirm the archive is absent before skipping its record; an existing unreadable archive or failed
+listing stops the check. See [S3 HeadObject permissions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html).
 The worker never needs DeleteObject, retention-bypass, or bucket-administration permissions.
 
 Configure destination versioning, Object Lock, and lifecycle retention independently. Keep manifests and their

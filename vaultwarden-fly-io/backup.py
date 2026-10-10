@@ -151,6 +151,8 @@ def s3_store(backup=False):
 
 
 def read_completion(store, key, now):
+    from botocore.exceptions import ClientError
+
     response = store.client.get_object(Bucket=store.bucket, Key=key)
     with closing(response["Body"]) as body:
         raw = body.read(65537)
@@ -171,7 +173,21 @@ def read_completion(store, key, now):
         or any(char not in "0123456789abcdef" for char in checksum)
     ):
         raise BackupError("invalid archive metadata")
-    head = store.client.head_object(Bucket=store.bucket, Key=record["archive_key"])
+    try:
+        head = store.client.head_object(Bucket=store.bucket, Key=record["archive_key"])
+    except ClientError as error:
+        if error.response["Error"]["Code"] not in ("403", "AccessDenied"):
+            raise
+        # Prefix-scoped ListBucket may leave HEAD unable to distinguish absent from denied.
+        # An authorized exact-prefix listing proves absence without granting bucket-wide access.
+        listed = store.client.list_objects_v2(
+            Bucket=store.bucket, Prefix=record["archive_key"], MaxKeys=1
+        )
+        if any(
+            obj["Key"] == record["archive_key"] for obj in listed.get("Contents", [])
+        ):
+            raise
+        raise BackupError("completed archive is missing") from None
     if (
         head["ContentLength"] != record["archive_size"]
         or head.get("Metadata", {}).get("sha256") != record["archive_sha256"]
