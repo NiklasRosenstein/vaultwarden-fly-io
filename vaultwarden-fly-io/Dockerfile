@@ -12,7 +12,7 @@ RUN arch=$(cat /tmp/arch) &&\
     wget https://github.com/yandex-cloud/geesefs/releases/download/v0.41.3/geesefs-linux-${arch} -O geesefs && \
     chmod +x geesefs
 
-FROM ghcr.io/dani-garcia/vaultwarden:1.37.2-alpine
+FROM ghcr.io/dani-garcia/vaultwarden:1.37.4-alpine
 RUN apk add age envsubst fuse jq minio-client openssl sudo python3 py3-boto3 && \
     ln -s /usr/bin/mcli /usr/bin/mc
 COPY --from=litestream /litestream /usr/bin/litestream
