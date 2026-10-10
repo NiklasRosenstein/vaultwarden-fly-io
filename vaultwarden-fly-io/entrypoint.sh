@@ -83,8 +83,40 @@ mount_s3() {
 }
 
 S3_MONITOR_FAILED_MARKER=/tmp/s3-monitor-failed
+S3_MONITOR_MC_CONFIG_DIR=/tmp/s3-monitor-mc
 
-check_s3() {
+run_with_deadline() {
+  # Run a command (output discarded) and wait at most $1 seconds for it to finish. Unlike `timeout`, this never blocks
+  # on a process that is stuck in a request to a dead FUSE mount, which not even SIGKILL may be able to end; such a
+  # process is left behind.
+  deadline=$1
+  shift
+  rc_file="$(mktemp)"
+  (
+    rc=0
+    "$@" >/dev/null 2>&1 || rc=$?
+    echo "$rc" >"$rc_file"
+  ) &
+  job_pid=$!
+  waited=0
+  while [ ! -s "$rc_file" ]; do
+    if [ "$waited" -ge "$deadline" ]; then
+      pkill -KILL -P "$job_pid" 2>/dev/null || true
+      kill -KILL "$job_pid" 2>/dev/null || true
+      wait "$job_pid" 2>/dev/null || true
+      rm -f "$rc_file"
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$job_pid" 2>/dev/null || true
+  rc="$(cat "$rc_file")"
+  rm -f "$rc_file"
+  return "$rc"
+}
+
+check_s3_mount() {
   # Returns 0 if the GeeseFS mount at /mnt/s3 looks healthy, 1 if it is degraded (possibly transient) and 2 if it is
   # definitely broken (GeeseFS process gone or the mount disappeared).
   if ! pgrep -x geesefs >/dev/null; then
@@ -95,24 +127,26 @@ check_s3() {
     error "s3-monitor: /mnt/s3 is not mounted"
     return 2
   fi
-  # Listing the directory goes to S3 once GeeseFS' stat cache expires, so this also catches a broken connection. A dead
-  # FUSE mount can hang indefinitely, hence the timeout.
-  if ! timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" ls /mnt/s3 >/dev/null 2>&1; then
+  # Listing the directory goes to S3 once GeeseFS' stat cache expires, so this also catches a broken connection.
+  if ! run_with_deadline "$GEESEFS_MONITOR_TIMEOUT" ls /mnt/s3; then
     warn "s3-monitor: listing /mnt/s3 failed or did not complete within ${GEESEFS_MONITOR_TIMEOUT}s"
     return 1
   fi
-  # Write a small file and fsync it, which makes GeeseFS upload it to S3 right away, then read it back. This catches a
-  # mount that can still serve reads from its cache but can no longer write to the bucket.
+  # Write a small file and fsync it, which makes GeeseFS upload it to S3 right away. This catches a mount that can still
+  # serve reads from its cache but can no longer write to the bucket.
   if [ "$GEESEFS_MONITOR_WRITE_CHECK" = "true" ]; then
     probe_file="/mnt/s3/.s3-monitor-${FLY_MACHINE_ID:-$(hostname)}"
-    probe_value="$(date +%s)"
-    if ! echo "$probe_value" | timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" dd of="$probe_file" conv=fsync 2>/dev/null \
-      || [ "$(timeout -s KILL "$GEESEFS_MONITOR_TIMEOUT" cat "$probe_file" 2>/dev/null)" != "$probe_value" ]; then
+    if ! run_with_deadline "$GEESEFS_MONITOR_TIMEOUT" sh -c 'date +%s | dd of="$1" conv=fsync' _ "$probe_file"; then
       warn "s3-monitor: writing $probe_file failed or did not complete within ${GEESEFS_MONITOR_TIMEOUT}s"
       return 1
     fi
   fi
   return 0
+}
+
+check_s3_bucket() {
+  # Returns 0 if the S3 bucket can be reached directly, without going through GeeseFS.
+  run_with_deadline "$GEESEFS_MONITOR_TIMEOUT" mc --config-dir "$S3_MONITOR_MC_CONFIG_DIR" ls "s3monitor/$BUCKET_NAME/"
 }
 
 monitor_s3() {
@@ -121,12 +155,18 @@ monitor_s3() {
   trap - EXIT
   main_pid="$1"
   failures=0
+  check_bucket=true
+  if ! mc --config-dir "$S3_MONITOR_MC_CONFIG_DIR" alias set s3monitor "${AWS_ENDPOINT_URL_S3:-}" \
+    "${AWS_ACCESS_KEY_ID:-}" "${AWS_SECRET_ACCESS_KEY:-}" --api S3v4 >/dev/null 2>&1; then
+    warn "s3-monitor: could not configure mc, will not check that S3 is reachable before restarting"
+    check_bucket=false
+  fi
   info "s3-monitor: started (interval ${GEESEFS_MONITOR_INTERVAL}s, timeout ${GEESEFS_MONITOR_TIMEOUT}s," \
     "failure threshold ${GEESEFS_MONITOR_FAILURE_THRESHOLD}, write check ${GEESEFS_MONITOR_WRITE_CHECK})"
   while kill -0 "$main_pid" 2>/dev/null; do
     sleep "$GEESEFS_MONITOR_INTERVAL"
     status=0
-    check_s3 || status=$?
+    check_s3_mount || status=$?
     if [ "$status" -eq 0 ]; then
       if [ "$failures" -gt 0 ]; then
         info "s3-monitor: /mnt/s3 recovered after $failures failed check(s)"
@@ -139,6 +179,13 @@ monitor_s3() {
       warn "s3-monitor: check failed ($failures/$GEESEFS_MONITOR_FAILURE_THRESHOLD)"
       continue
     fi
+    # The machine's disk does not survive a restart: Litestream must be able to upload its pending changes on shutdown
+    # and restore the database on startup. During an S3 outage, keep serving from the local database instead.
+    if [ "$check_bucket" = "true" ] && ! check_s3_bucket; then
+      warn "s3-monitor: /mnt/s3 is broken, but S3 itself is unreachable too; not restarting while that is the case" \
+        "to avoid losing database changes that Litestream has not uploaded yet"
+      continue
+    fi
     error "s3-monitor: /mnt/s3 looks unrecoverable, terminating to force a restart of the machine"
     touch "$S3_MONITOR_FAILED_MARKER"
     kill -TERM "$main_pid" 2>/dev/null || true
@@ -149,44 +196,76 @@ monitor_s3() {
   done
 }
 
+assert_positive_int() {
+  eval "val=\${$1}"
+  case "$val" in
+  '' | *[!0-9]* | 0)
+    error "$1 must be a positive integer, got \"$val\""
+    exit 1
+    ;;
+  esac
+}
+
+on_stop_signal() {
+  # The machine is being stopped on purpose: stop monitoring so that a check failing during shutdown can't turn this
+  # into a restart, and pass the signal on.
+  if [ -n "$monitor_pid" ]; then
+    kill "$monitor_pid" 2>/dev/null || true
+  fi
+  rm -f "$S3_MONITOR_FAILED_MARKER"
+  kill -TERM "$main_pid" 2>/dev/null || true
+}
+
 run_main() {
   # Run the given command in the background, forwarding termination signals to it, and supervise /mnt/s3 next to it.
   # We can't just exec the command, as we need to exit with a non-zero status when the S3 monitor kicks in for Fly.io
   # to restart the machine.
-  rm -f "$S3_MONITOR_FAILED_MARKER"
-  info "$@"
-  "$@" &
-  main_pid=$!
-  trap 'kill -TERM $main_pid 2>/dev/null' INT TERM
-
-  monitor_pid=
+  monitor_enabled=false
   if [ "${GEESEFS_ENABLED:-true}" = "true" ] && [ "${GEESEFS_MONITOR_ENABLED:-true}" = "true" ]; then
+    monitor_enabled=true
     GEESEFS_MONITOR_INTERVAL=${GEESEFS_MONITOR_INTERVAL:-30}
     GEESEFS_MONITOR_TIMEOUT=${GEESEFS_MONITOR_TIMEOUT:-20}
     GEESEFS_MONITOR_FAILURE_THRESHOLD=${GEESEFS_MONITOR_FAILURE_THRESHOLD:-3}
     GEESEFS_MONITOR_WRITE_CHECK=${GEESEFS_MONITOR_WRITE_CHECK:-true}
+    assert_positive_int GEESEFS_MONITOR_INTERVAL
+    assert_positive_int GEESEFS_MONITOR_TIMEOUT
+    assert_positive_int GEESEFS_MONITOR_FAILURE_THRESHOLD
+    case "$GEESEFS_MONITOR_WRITE_CHECK" in
+    true | false) ;;
+    *)
+      error "GEESEFS_MONITOR_WRITE_CHECK must be \"true\" or \"false\", got \"$GEESEFS_MONITOR_WRITE_CHECK\""
+      exit 1
+      ;;
+    esac
+  fi
+
+  rm -f "$S3_MONITOR_FAILED_MARKER"
+  main_pid=
+  monitor_pid=
+  trap 'on_stop_signal' INT TERM
+  info "$@"
+  "$@" &
+  main_pid=$!
+  if [ "$monitor_enabled" = "true" ]; then
     monitor_s3 "$main_pid" &
     monitor_pid=$!
   fi
 
   # `wait` returns early when a trapped signal arrives, so keep waiting until the process has actually exited.
-  status=0
-  wait "$main_pid" || status=$?
-  while kill -0 "$main_pid" 2>/dev/null; do
+  while :; do
     status=0
     wait "$main_pid" || status=$?
+    kill -0 "$main_pid" 2>/dev/null || break
   done
-  trap - INT TERM
+  trap - INT TERM EXIT
 
   if [ -n "$monitor_pid" ]; then
     kill "$monitor_pid" 2>/dev/null || true
   fi
   if [ -f "$S3_MONITOR_FAILED_MARKER" ]; then
     error "exiting because the S3 monitor detected a broken /mnt/s3 mount"
-    trap - EXIT
-    exit 1
+    status=1
   fi
-  trap - EXIT
   exit "$status"
 }
 
