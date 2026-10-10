@@ -161,6 +161,17 @@ class BackupTests(unittest.TestCase):
                 "AGE_SECRET_KEY": "litestream-secret",
                 "UNRELATED_SECRET": "must-not-be-exported",
                 "BACKUP_AWS_SECRET_ACCESS_KEY": "destination-secret",
+                "BACKUP_AWS_ACCESS_KEY_ID": "destination-key",
+                "BACKUP_AWS_SESSION_TOKEN": "destination-session",
+                "BACKUP_AWS_REGION": "eu-west-1",
+                "BACKUP_BUCKET_NAME": "backups",
+                "BACKUP_PREFIX": "kalix.cluster.rosenstein.app/vaultwarden",
+                "BUCKET_NAME": "source",
+                "AWS_ACCESS_KEY_ID": "source-key",
+                "AWS_SECRET_ACCESS_KEY": "source-secret",
+                "AWS_SESSION_TOKEN": "source-session",
+                "AWS_REGION": "eu-central-1",
+                "AWS_ENDPOINT_URL_S3": "https://source.invalid",
                 "VAULTWARDEN_SMTP_PASSWORD": "mail-secret",
             },
             clear=True,
@@ -179,16 +190,18 @@ class BackupTests(unittest.TestCase):
             patch.object(
                 backup,
                 "s3_store",
-                side_effect=lambda backup=False: (
-                    self.destination if backup else self.source
+                side_effect=lambda **config: (
+                    self.destination if config["bucket"] == "backups" else self.source
                 ),
-            ),
+            ) as stores,
             patch.object(backup, "urlopen", return_value=response),
             patch.object(
                 backup.subprocess, "check_output", return_value=b"Vaultwarden 1.37.2"
             ),
         ):
-            return backup.run_once(work)
+            next_due = backup.main(work)
+            self.store_configs = [call.kwargs for call in stores.call_args_list]
+            return next_due
 
     def test_capture_encrypt_restore_and_restart_schedule(self):
         next_due = self.run_capture()
@@ -429,45 +442,114 @@ class BackupTests(unittest.TestCase):
         self.assertFalse(missing.exists())
 
     def test_rejects_uninitialized_database(self):
-        empty = self.root / "empty.db"
-        sqlite3.connect(empty).close()
+        for table in ("users", "ciphers", "attachments", "sends"):
+            self.connection.execute(f"DROP TABLE {table}")
+        self.connection.commit()
         with self.assertRaisesRegex(ValueError, "initialized"):
-            backup.snapshot_database(empty, self.root / "out.db")
+            self.run_capture()
+        self.assertEqual(self.destination_client.puts, [])
 
     def test_destination_credentials_are_separate(self):
-        env = {
-            "AWS_ACCESS_KEY_ID": "source",
-            "AWS_SECRET_ACCESS_KEY": "source-secret",
-            "BACKUP_AWS_ACCESS_KEY_ID": "destination",
-            "BACKUP_AWS_SECRET_ACCESS_KEY": "dest-secret",
-            "BACKUP_AWS_REGION": "eu-west-1",
-            "BACKUP_BUCKET_NAME": "backups",
-            "BACKUP_PREFIX": "vaultwarden",
-        }
-        with (
-            patch.dict(os.environ, env),
-            patch("boto3.client") as client,
-        ):
-            backup.s3_store(backup=True)
-        self.assertEqual(client.call_args.kwargs["aws_access_key_id"], "destination")
+        self.run_capture()
+        destination, source = self.store_configs
         self.assertEqual(
-            client.call_args.kwargs["aws_secret_access_key"], "dest-secret"
+            destination,
+            {
+                "bucket": "backups",
+                "prefix": "kalix.cluster.rosenstein.app/vaultwarden",
+                "access_key": "destination-key",
+                "secret_key": "destination-secret",
+                "session_token": "destination-session",
+                "region": "eu-west-1",
+                "endpoint_url": None,
+            },
+        )
+        self.assertEqual(
+            source,
+            {
+                "bucket": "source",
+                "prefix": "data",
+                "access_key": "source-key",
+                "secret_key": "source-secret",
+                "session_token": "source-session",
+                "region": "eu-central-1",
+                "endpoint_url": "https://source.invalid",
+            },
         )
 
     def test_destination_does_not_inherit_source_endpoint(self):
-        env = {
-            "AWS_ENDPOINT_URL_S3": "https://source.invalid",
-            "BACKUP_AWS_ACCESS_KEY_ID": "destination",
-            "BACKUP_AWS_SECRET_ACCESS_KEY": "secret",
-            "BACKUP_AWS_REGION": "eu-west-1",
-            "BACKUP_BUCKET_NAME": "backups",
-            "BACKUP_PREFIX": "vaultwarden",
-        }
-        with patch.dict(os.environ, env):
-            store = backup.s3_store(backup=True)
+        store = backup.s3_store(
+            bucket="backups",
+            prefix="vaultwarden",
+            access_key="destination",
+            secret_key="secret",
+            region="eu-west-1",
+        )
         self.assertEqual(
             store.client.meta.endpoint_url, "https://s3.eu-west-1.amazonaws.com"
         )
+        credentials = store.client._request_signer._credentials
+        self.assertEqual(credentials.access_key, "destination")
+        self.assertEqual(credentials.secret_key, "secret")
+        self.assertIsNone(credentials.token)
+
+    def test_file_capture_and_validation_accept_arbitrary_prefixes(self):
+        self.source_client.data.update(
+            {
+                "data/documents/a": b"hello",
+                "data/media/b": b"world",
+                "data/private/c": b"excluded",
+            }
+        )
+        files = self.root / "custom-files"
+        prefixes = ("documents/", "media/")
+        # The size budget is shared across prefixes.
+        with self.assertRaisesRegex(ValueError, "exceeds"):
+            backup.capture_files(
+                self.source, self.root / "too-small", 9, prefixes=prefixes
+            )
+        backup.capture_files(self.source, files, 10, prefixes=prefixes)
+        self.assertEqual(
+            {str(p.relative_to(files)) for p in files.rglob("*") if p.is_file()},
+            {"documents/a", "media/b"},
+        )
+        self.assertEqual(
+            backup.validate_files(
+                [("documents/a", 5), ("media/b", 5), ("documents/missing", 7)], files
+            ),
+            [{"path": "documents/missing", "expected_size": 7}],
+        )
+        with self.assertRaisesRegex(ValueError, "size mismatch"):
+            backup.validate_files([("documents/a", 6)], files)
+
+    def test_snapshot_supports_other_sqlite_schemas(self):
+        source, target = self.root / "generic.db", self.root / "snapshot.db"
+        with closing(sqlite3.connect(source)) as db:
+            db.execute("CREATE TABLE notes (text TEXT)")
+            db.execute("INSERT INTO notes VALUES ('example')")
+            db.commit()
+        backup.snapshot_database(source, target)
+        with closing(sqlite3.connect(target)) as db:
+            self.assertEqual(
+                db.execute("SELECT text FROM notes").fetchall(), [("example",)]
+            )
+
+    def test_encryption_uses_explicit_archive_root(self):
+        payload = self.root / "input"
+        payload.mkdir()
+        (payload / "file").write_bytes(b"contents")
+        encrypted = self.root / "custom.age"
+        backup.encrypt_archive(
+            payload, encrypted, self.recipient, arcname="custom-root"
+        )
+        decrypted = subprocess.check_output(
+            ["age", "-d", "-i", str(self.key), str(encrypted)], timeout=10
+        )
+        with tarfile.open(fileobj=io.BytesIO(decrypted), mode="r:gz") as archive:
+            self.assertEqual(archive.getnames(), ["custom-root", "custom-root/file"])
+            self.assertEqual(
+                archive.extractfile("custom-root/file").read(), b"contents"
+            )
 
 
 class SupervisorTests(unittest.TestCase):
@@ -485,7 +567,7 @@ class SupervisorTests(unittest.TestCase):
             "import os; os.umask(0o022); "
             f"backup.__file__={str(worker_path)!r}; {setup} "
             f"sys.argv=['backup.py', 'supervise', sys.executable, '-c', {app!r}]; "
-            "sys.exit(backup.main())"
+            "sys.exit(backup.cli())"
         )
         env = dict(
             os.environ, BACKUP_TIMEOUT_SECONDS="1", BACKUP_TMP_DIR=str(self.root)
@@ -578,11 +660,11 @@ class SupervisorTests(unittest.TestCase):
                 patch.object(sys, "argv", ["backup.py", "once", str(self.root)]),
                 patch.object(
                     backup,
-                    "run_once",
+                    "main",
                     side_effect=lambda _: observed.append(os.umask(0o077)) or 123,
                 ),
             ):
-                self.assertEqual(backup.main(), 0)
+                self.assertEqual(backup.cli(), 0)
         finally:
             os.umask(previous)
         self.assertEqual(observed, [0o077])

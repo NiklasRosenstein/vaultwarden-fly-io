@@ -122,19 +122,26 @@ class Store:
             yield from page.get("Contents", [])
 
 
-def s3_store(backup=False):
+def s3_store(
+    *,
+    bucket,
+    prefix,
+    access_key,
+    secret_key,
+    region,
+    session_token=None,
+    endpoint_url=None,
+):
     import boto3
     from botocore.config import Config
 
-    # Explicit credentials prevent destination requests from using source AWS credentials.
-    prefix = "BACKUP_" if backup else ""
     client = boto3.client(
         "s3",
-        aws_access_key_id=required(prefix + "AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=required(prefix + "AWS_SECRET_ACCESS_KEY"),
-        aws_session_token=os.environ.get(prefix + "AWS_SESSION_TOKEN"),
-        region_name=required(prefix + "AWS_REGION"),
-        endpoint_url=os.environ.get(prefix + "AWS_ENDPOINT_URL_S3"),
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        aws_session_token=session_token,
+        region_name=region,
+        endpoint_url=endpoint_url,
         config=Config(
             connect_timeout=10,
             read_timeout=30,
@@ -143,11 +150,7 @@ def s3_store(backup=False):
             s3={"addressing_style": "path"},
         ),
     )
-    return Store(
-        client,
-        required(prefix + "BUCKET_NAME"),
-        required("BACKUP_PREFIX") if backup else "data",
-    )
+    return Store(client, bucket, prefix)
 
 
 def read_completion(store, key, now):
@@ -230,14 +233,6 @@ def snapshot_database(source, destination):
             db.backup(copy, pages=256, sleep=0.1)
             if copy.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
                 raise BackupError("SQLite integrity check failed")
-            tables = {
-                row[0]
-                for row in copy.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
-            if not {"users", "ciphers", "attachments", "sends"} <= tables:
-                raise BackupError("not an initialized Vaultwarden database")
 
 
 def safe_path(root, name):
@@ -247,8 +242,8 @@ def safe_path(root, name):
     return root.joinpath(*parts)
 
 
-def capture_files(store, destination, remaining_bytes):
-    for prefix in ("attachments/", "sends/"):
+def capture_files(store, destination, remaining_bytes, *, prefixes):
+    for prefix in prefixes:
         for obj in store.objects(prefix):
             key = obj["Key"]
             relative = key.removeprefix(store.key(""))
@@ -276,17 +271,7 @@ def capture_files(store, destination, remaining_bytes):
             remaining_bytes -= size
 
 
-def validate_files(database, files):
-    with closing(sqlite3.connect(database)) as db:
-        expected = [
-            (f"attachments/{cipher}/{ident}", size)
-            for ident, cipher, size in db.execute(
-                "SELECT id, cipher_uuid, file_size FROM attachments"
-            )
-        ]
-        for ident, data in db.execute("SELECT uuid, data FROM sends WHERE atype=1"):
-            data = {key.lower(): value for key, value in json.loads(data).items()}
-            expected.append((f"sends/{ident}/{data['id']}", int(data["size"])))
+def validate_files(expected, files):
     missing = []
     for name, size in expected:
         try:
@@ -299,19 +284,7 @@ def validate_files(database, files):
     return missing
 
 
-def capture_recovery(destination):
-    config = json.loads((DATA_DIR / "config.json").read_text())
-    environment = {
-        name: os.environ[name] for name in RECOVERY_FIELDS if name in os.environ
-    }
-    environment["VAULTWARDEN_DOMAIN"] = config["domain"]
-    environment["VAULTWARDEN_RSA_PRIVATE_KEY"] = (DATA_DIR / "rsa_key.pem").read_text()
-    write_json(destination / "environment.json", environment)
-    write_json(destination / "config.json", config)
-    (destination / "rsa_key.pem").write_text(environment["VAULTWARDEN_RSA_PRIVATE_KEY"])
-
-
-def encrypt_archive(payload, target, recipient):
+def encrypt_archive(payload, target, recipient, *, arcname):
     with target.open("xb") as output:
         with subprocess.Popen(
             ["age", "-r", recipient],
@@ -321,7 +294,7 @@ def encrypt_archive(payload, target, recipient):
         ) as age:
             try:
                 with tarfile.open(fileobj=age.stdin, mode="w|gz") as archive:
-                    archive.add(payload, arcname="vaultwarden")
+                    archive.add(payload, arcname=arcname)
             finally:
                 age.stdin.close()
             if age.wait() != 0:
@@ -369,8 +342,17 @@ def publish(store, archive, record):
     )
 
 
-def run_once(work):
-    destination = s3_store(backup=True)
+def main(work):
+    """Capture the Vaultwarden recovery payload and return the next scheduled time."""
+    destination = s3_store(
+        bucket=required("BACKUP_BUCKET_NAME"),
+        prefix=required("BACKUP_PREFIX"),
+        access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
+        secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
+        region=required("BACKUP_AWS_REGION"),
+        session_token=os.environ.get("BACKUP_AWS_SESSION_TOKEN"),
+        endpoint_url=os.environ.get("BACKUP_AWS_ENDPOINT_URL_S3"),
+    )
     interval = positive_int("BACKUP_INTERVAL_SECONDS", 3600)
     now = time.time()
     previous = latest_capture(destination, now)
@@ -405,14 +387,53 @@ def run_once(work):
     database_finished = time.time()
     if database.stat().st_size > maximum:
         raise BackupError("database exceeds BACKUP_MAX_BYTES")
+    with closing(sqlite3.connect(database)) as db:
+        tables = {
+            row[0]
+            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if not {"users", "ciphers", "attachments", "sends"} <= tables:
+            raise BackupError("not an initialized Vaultwarden database")
+        expected = [
+            (f"attachments/{cipher}/{ident}", size)
+            for ident, cipher, size in db.execute(
+                "SELECT id, cipher_uuid, file_size FROM attachments"
+            )
+        ]
+        for ident, data in db.execute("SELECT uuid, data FROM sends WHERE atype=1"):
+            data = {key.lower(): value for key, value in json.loads(data).items()}
+            expected.append((f"sends/{ident}/{data['id']}", int(data["size"])))
     LOG.info("capturing files")
     files = payload / "files"
     files.mkdir()
-    capture_files(s3_store(), files, maximum - database.stat().st_size)
-    missing = validate_files(database, files)
+    source_store = s3_store(
+        bucket=required("BUCKET_NAME"),
+        prefix="data",
+        access_key=required("AWS_ACCESS_KEY_ID"),
+        secret_key=required("AWS_SECRET_ACCESS_KEY"),
+        region=required("AWS_REGION"),
+        session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3"),
+    )
+    capture_files(
+        source_store,
+        files,
+        maximum - database.stat().st_size,
+        prefixes=("attachments/", "sends/"),
+    )
+    missing = validate_files(expected, files)
     recovery = payload / "recovery"
     recovery.mkdir()
-    capture_recovery(recovery)
+    config = json.loads((DATA_DIR / "config.json").read_text())
+    environment = {
+        name: os.environ[name] for name in RECOVERY_FIELDS if name in os.environ
+    }
+    environment["VAULTWARDEN_DOMAIN"] = config["domain"]
+    environment["VAULTWARDEN_RSA_PRIVATE_KEY"] = (DATA_DIR / "rsa_key.pem").read_text()
+    write_json(recovery / "environment.json", environment)
+    write_json(recovery / "config.json", config)
+    (recovery / "rsa_key.pem").write_text(environment["VAULTWARDEN_RSA_PRIVATE_KEY"])
+
     version = (
         subprocess.check_output(["/vaultwarden", "--version"], timeout=10)
         .decode()
@@ -442,7 +463,7 @@ def run_once(work):
     )
     archive = work / "backup.tar.age"
     LOG.info("encrypting archive")
-    encrypt_archive(payload, archive, recipient)
+    encrypt_archive(payload, archive, recipient, arcname="vaultwarden")
     LOG.info("uploading archive")
     publish(destination, archive, record)
     LOG.log(
@@ -566,7 +587,8 @@ def supervise(command):
     return app.returncode if app.returncode >= 0 else 128 - app.returncode
 
 
-def main():
+def cli():
+    """Dispatch supervisor/worker modes and report failures without exposing secrets."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s level=%(levelname)s component=backup %(message)s",
@@ -577,7 +599,7 @@ def main():
         os.umask(0o077)
         try:
             work = Path(sys.argv[2])
-            write_json(work / "schedule.json", {"next_due": run_once(work)})
+            write_json(work / "schedule.json", {"next_due": main(work)})
             return 0
         except Exception as error:
             # SDK/SQLite exceptions can contain credentials, URLs or account data.
@@ -590,4 +612,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli())
