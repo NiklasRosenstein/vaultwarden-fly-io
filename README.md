@@ -239,18 +239,17 @@ or access a secrets manager.
 
 ### Development checks
 
-Install Python 3.12 or newer and `age`, then run from the repository root:
+Install uv and `age`, then run from the repository root (uv manages Python 3.12):
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/python -m mypy
-.venv/bin/python -m unittest discover -s tests -v
+uv sync --locked --group dev --python 3.12
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+uv run --no-sync python -m mypy
+uv run --no-sync python -m unittest discover -s tests -v
 ```
 
 CI requires lint, formatting, strict type checks, and tests before building the image.
-Use `.venv/bin/ruff format .` to apply formatting. SDK stubs and checking tools are development dependencies only.
-`requirements-dev.txt` locks transitive dependencies; update `requirements-dev.in` and regenerate it with
-`uv pip compile --universal --python-version 3.12 requirements-dev.in -o requirements-dev.txt`.
+Use `uv run --no-sync ruff format .` to apply formatting. Dependencies are declared in `pyproject.toml`
+and locked in `uv.lock`; run `uv lock` after editing them, or `uv lock --upgrade` to update resolved versions.
+SDK stubs and checking tools belong to the `dev` group. The image installs runtime dependencies through Alpine.

@@ -13,20 +13,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.11.26"
+          python-version: "3.12"
       - name: Install development dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y age python3-venv
-          python3 -m venv .venv
-          .venv/bin/python -m pip install -r requirements-dev.txt
+          sudo apt-get install -y age
+          uv sync --locked --group dev
       - name: Lint Python
-        run: .venv/bin/ruff check .
+        run: uv run --no-sync ruff check .
       - name: Check Python formatting
-        run: .venv/bin/ruff format --check .
+        run: uv run --no-sync ruff format --check .
       - name: Type check Python
-        run: .venv/bin/python -m mypy
+        run: uv run --no-sync python -m mypy
       - name: Test scheduled backups
-        run: .venv/bin/python -m unittest discover -s tests -v
+        run: uv run --no-sync python -m unittest discover -s tests -v
 
   docker:
     needs: test

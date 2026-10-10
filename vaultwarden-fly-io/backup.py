@@ -20,8 +20,17 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Final, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
 from urllib.request import urlopen
+
+from pydantic import (
+    AfterValidator,
+    BeforeValidator,
+    Field,
+    TypeAdapter,
+    ValidationError,
+)
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -69,31 +78,48 @@ RECOVERY_EXCLUSIONS = {
 }
 
 
+def validate_timestamp(value: str) -> str:
+    parse_utc(value)
+    return value
+
+
+def validate_version_type(value: object) -> object:
+    # Literal[1] also matches True and 1.0 unless the input type is checked first.
+    if type(value) is not int:
+        raise ValueError("schema version must be an integer")
+    return value
+
+
+Timestamp = Annotated[str, AfterValidator(validate_timestamp)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
+Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
 class CaptureRecordV1(TypedDict):
-    schema_version: Literal[1]
+    schema_version: Annotated[Literal[1], BeforeValidator(validate_version_type)]
     backup_id: str
-    captured_at: str
-    database_capture_finished_at: str
+    captured_at: Timestamp
+    database_capture_finished_at: Timestamp
     vaultwarden_version: str
     status: Literal["complete", "degraded"]
-    missing_file_count: int
+    missing_file_count: NonNegativeInt
 
 
 class CompletionManifestV1(CaptureRecordV1):
-    completed_at: str
+    completed_at: Timestamp
     archive_key: str
-    archive_size: int
-    archive_sha256: str
+    archive_size: Annotated[int, Field(gt=0)]
+    archive_sha256: Sha256
 
 
 class MissingFile(TypedDict):
     path: str
-    expected_size: int
+    expected_size: NonNegativeInt
 
 
 class FileDetails(TypedDict):
-    size: int
-    sha256: str
+    size: NonNegativeInt
+    sha256: Sha256
 
 
 class PayloadManifestV1(CaptureRecordV1):
@@ -159,45 +185,30 @@ def json_string(value: object) -> str:
     return value
 
 
-def json_integer(value: object) -> int:
-    if type(value) is not int:
-        raise BackupError("expected JSON integer")
+def validate_capture[CaptureRecord: CaptureRecordV1](
+    value: CaptureRecord,
+) -> CaptureRecord:
+    if (value["status"] == "complete") != (value["missing_file_count"] == 0):
+        raise ValueError("completion status disagrees with missing file count")
     return value
+
+
+COMPLETION_ADAPTER = TypeAdapter(
+    Annotated[CompletionManifestV1, AfterValidator(validate_capture)]
+)
+
+PAYLOAD_ADAPTER = TypeAdapter(
+    Annotated[PayloadManifestV1, AfterValidator(validate_capture)]
+)
 
 
 def decode_completion(raw: bytes) -> CompletionManifestV1:
     """Validate the version 1 wire format before exposing typed scheduling metadata."""
-    value = json_object(raw)
-    if json_integer(value["schema_version"]) != SCHEMA_VERSION:
-        raise BackupError("unsupported completion manifest version")
-    status = value["status"]
-    if status not in ("complete", "degraded"):
-        raise BackupError("invalid completion status")
-    count = json_integer(value["missing_file_count"])
-    size = json_integer(value["archive_size"])
-    checksum = json_string(value["archive_sha256"])
-    if count < 0 or (status == "complete") != (count == 0) or size <= 0:
-        raise BackupError("invalid completion counts")
-    if len(checksum) != 64 or any(char not in "0123456789abcdef" for char in checksum):
-        raise BackupError("invalid archive checksum")
-    captured = json_string(value["captured_at"])
-    finished = json_string(value["database_capture_finished_at"])
-    completed = json_string(value["completed_at"])
-    for timestamp in (captured, finished, completed):
-        parse_utc(timestamp)
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "backup_id": json_string(value["backup_id"]),
-        "captured_at": captured,
-        "database_capture_finished_at": finished,
-        "completed_at": completed,
-        "vaultwarden_version": json_string(value["vaultwarden_version"]),
-        "status": "complete" if status == "complete" else "degraded",
-        "missing_file_count": count,
-        "archive_key": json_string(value["archive_key"]),
-        "archive_size": size,
-        "archive_sha256": checksum,
-    }
+    try:
+        return COMPLETION_ADAPTER.validate_json(raw, strict=True)
+    except ValidationError:
+        # Validation errors contain input values; keep untrusted record data out of logs.
+        raise BackupError("invalid completion manifest") from None
 
 
 class Store:
@@ -421,7 +432,9 @@ def publish(store: Store, archive: Path, record: CaptureRecordV1) -> None:
         "archive_size": archive.stat().st_size,
         "archive_sha256": checksum.hex(),
     }
-    manifest = json.dumps(completion).encode()
+    manifest = COMPLETION_ADAPTER.dump_json(
+        COMPLETION_ADAPTER.validate_python(completion, strict=True)
+    )
     store.client.put_object(
         Bucket=store.bucket,
         Key=store.key(f"completed/{record['backup_id']}.json"),
@@ -553,7 +566,10 @@ def main(work: Path) -> float:
     if sum(entry["size"] for entry in entries.values()) > maximum:
         raise BackupError("backup exceeds BACKUP_MAX_BYTES")
     manifest: PayloadManifestV1 = {**record, "files": entries, "missing_files": missing}
-    write_json(payload / "manifest.json", manifest)
+    write_json(
+        payload / "manifest.json",
+        PAYLOAD_ADAPTER.validate_python(manifest, strict=True),
+    )
     archive = work / "backup.tar.age"
     LOG.info("encrypting archive")
     encrypt_archive(payload, archive, recipient, arcname="vaultwarden")

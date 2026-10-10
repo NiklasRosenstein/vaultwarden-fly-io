@@ -43,8 +43,9 @@ using `captured_at`, not upload time, and verify that the referenced archive exi
 backup is degraded: a recent archive protects the database but does not guarantee every attachment is recoverable.
 No monitor or retention controller is bundled in the image; configure external alerts and periodic restore tests.
 
-`CompletionManifestV1` in `backup.py` defines the version 1 completion schema. The decoder validates required
-fields, timestamps, status/count consistency, and checksum format before returning typed metadata. Unsupported
+`CompletionManifestV1` in `backup.py` defines the version 1 completion schema. Pydantic validates required
+fields, strict types, timestamps, status/count consistency, and checksum format before returning typed metadata.
+Both completion and encrypted payload manifests are validated before serialization. Unsupported
 schema versions are rejected; changes to the wire contract require a new version and an explicit decoder.
 
 Scheduling skips malformed completion records, future capture timestamps, and records with missing or mismatched

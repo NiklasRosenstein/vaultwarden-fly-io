@@ -671,6 +671,7 @@ class CompletionSchemaTests(unittest.TestCase):
             ("schema_version", 2),
             ("schema_version", "1"),
             ("schema_version", True),
+            ("schema_version", 1.0),
             ("backup_id", None),
             ("captured_at", 123),
             ("database_capture_finished_at", "not-a-date"),
@@ -685,6 +686,8 @@ class CompletionSchemaTests(unittest.TestCase):
             ("archive_size", "1024"),
             ("archive_size", True),
             ("archive_sha256", "bad"),
+            ("archive_sha256", "a" * 64 + "\n"),
+            ("archive_size", 1024.0),
         ]
         for key, value in invalid:
             with self.subTest(field=key, value=value):
@@ -696,12 +699,19 @@ class CompletionSchemaTests(unittest.TestCase):
         with self.assertRaises(backup.BackupError):
             backup.decode_completion(json.dumps(self.record).encode())
 
+    def test_rejects_invalid_json_without_exposing_input(self) -> None:
+        for raw in (b"[]", b"null", b"{", b'{"secret": "sensitive-value"}'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(backup.BackupError) as raised:
+                    backup.decode_completion(raw)
+                self.assertEqual(str(raised.exception), "invalid completion manifest")
+
     def test_rejects_each_missing_required_field(self) -> None:
         for key in self.record:
             with self.subTest(field=key):
                 raw: dict[str, object] = dict(self.record)
                 del raw[key]
-                with self.assertRaises(KeyError):
+                with self.assertRaises(backup.BackupError):
                     backup.decode_completion(json.dumps(raw).encode())
 
 

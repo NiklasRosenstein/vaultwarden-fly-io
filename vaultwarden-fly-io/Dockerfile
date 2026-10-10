@@ -13,7 +13,7 @@ RUN arch=$(cat /tmp/arch) &&\
     chmod +x geesefs
 
 FROM ghcr.io/dani-garcia/vaultwarden:1.37.4-alpine
-RUN apk add age envsubst fuse jq minio-client openssl sudo python3 py3-boto3 && \
+RUN apk add age envsubst fuse jq minio-client openssl sudo python3 py3-boto3 py3-pydantic && \
     ln -s /usr/bin/mcli /usr/bin/mc
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.3-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
