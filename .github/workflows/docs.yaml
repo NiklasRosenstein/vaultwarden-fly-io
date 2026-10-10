@@ -12,8 +12,9 @@ on:
     paths: ["docs/**", ".github/workflows/docs.yaml"]
   workflow_dispatch:
 
+# Previews and the main deploy all push to gh-pages, so run them one at a time.
 concurrency:
-  group: docs-${{ github.ref }}
+  group: docs-gh-pages
   cancel-in-progress: false
 
 jobs:

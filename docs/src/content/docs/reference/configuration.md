@@ -116,7 +116,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 | `GEESEFS_MONITOR_INTERVAL` | `30` | Seconds between checks. |
 | `GEESEFS_MONITOR_TIMEOUT` | `20` | Seconds after which a check is considered hung. |
 | `GEESEFS_MONITOR_FAILURE_THRESHOLD` | `3` | Consecutive failed checks before the mount is considered broken. |
-| `GEESEFS_MONITOR_WRITE_CHECK` | `true` | Also write, fsync and read back `/mnt/s3/.s3-monitor-<machine id>` on every check. That is one S3 upload per check, 86,400 a month at the default interval (see the [cost model](../costs/)). Set it to `false` to only list the directory. |
+| `GEESEFS_MONITOR_WRITE_CHECK` | `true` | Also write and fsync `/mnt/s3/.s3-monitor-<machine id>` on every check. That is one S3 upload per check, 86,400 a month at the default interval (see the [cost model](../costs/)). Set it to `false` to only list the directory. |
 
 ## Scheduled backups
 

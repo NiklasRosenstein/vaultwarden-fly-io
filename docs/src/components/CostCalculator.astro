@@ -1,0 +1,221 @@
+---
+// Interactive estimate of the monthly Fly.io + Tigris bill. The model mirrors the tables on the cost page.
+---
+
+<div class="calc not-content" data-cost-calculator>
+	<div class="inputs">
+		<fieldset>
+			<legend>Fly.io</legend>
+			<label>Hours running per day <input type="number" name="hours" value="24" min="0" max="24" step="0.5" /></label>
+			<label>Machine price, 24/7 (USD/month) <input type="number" name="machine" value="2" min="0" step="0.1" /></label>
+			<label class="check"><input type="checkbox" name="waiver" checked /> Personal org: invoices under 5 USD waived</label>
+		</fieldset>
+		<fieldset>
+			<legend>Litestream</legend>
+			<label>Sync interval (seconds) <input type="number" name="sync" value="10" min="1" step="1" /></label>
+			<label>Write bursts per day <input type="number" name="bursts" value="300" min="0" step="10" /></label>
+		</fieldset>
+		<fieldset>
+			<legend>S3 mount monitor</legend>
+			<label>Check interval (seconds) <input type="number" name="monitor" value="30" min="1" step="1" /></label>
+			<label class="check"><input type="checkbox" name="writecheck" checked /> Write check</label>
+			<label class="check"><input type="checkbox" name="listworst" checked /> Every listing hits S3 (worst case)</label>
+		</fieldset>
+		<fieldset>
+			<legend>Storage and backups</legend>
+			<label>Attachments and Sends (GB) <input type="number" name="files" value="0.1" min="0" step="0.1" /></label>
+			<label class="check"><input type="checkbox" name="backups" /> Scheduled backups (same Tigris account)</label>
+			<div class="backup-options">
+			<label>Backup interval (hours) <input type="number" name="binterval" value="1" min="0.25" step="0.25" /></label>
+			<label>Archive size (MB) <input type="number" name="bsize" value="50" min="0" step="10" /></label>
+			<label>Keep archives for (days) <input type="number" name="bkeep" value="30" min="1" step="1" /></label>
+			</div>
+		</fieldset>
+	</div>
+
+	<div class="results">
+		<div class="tiles">
+			<div class="tile"><span>Fly.io</span><strong data-out="fly">–</strong></div>
+			<div class="tile"><span>Tigris</span><strong data-out="tigris">–</strong></div>
+			<div class="tile total"><span data-out="totalLabel">Total per month</span><strong data-out="total">–</strong></div>
+		</div>
+		<table>
+			<thead><tr><th>Class A requests</th><th>per month</th></tr></thead>
+			<tbody data-out="rows"></tbody>
+			<tfoot>
+				<tr><th>Total (10,000 free)</th><th data-out="classA"></th></tr>
+				<tr><td>Class B requests (100,000 free)</td><td data-out="classB"></td></tr>
+				<tr><td>Storage (5 GB free)</td><td data-out="storage"></td></tr>
+			</tfoot>
+		</table>
+		<p class="hint">Estimates for a 30-day month at the prices on this page. Real usage varies.</p>
+	</div>
+</div>
+
+<script>
+	const MONTH_S = 30 * 24 * 3600;
+	const PRICE = { a: 0.005 / 1000, b: 0.0005 / 1000, gb: 0.02 };
+	const FREE = { a: 10_000, b: 100_000, gb: 5 };
+	const usd = (v: number) => `$${v.toFixed(2)}`;
+	const int = (v: number) => Math.round(v).toLocaleString('en-US');
+
+	for (const root of document.querySelectorAll<HTMLElement>('[data-cost-calculator]')) {
+		const field = (name: string) => root.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+		const num = (name: string) => Math.max(0, Number(field(name).value) || 0);
+		const on = (name: string) => field(name).checked;
+		const out = (name: string) => root.querySelector<HTMLElement>(`[data-out="${name}"]`)!;
+
+		const update = () => {
+			const running = Math.min(num('hours'), 24) / 24;
+			const seconds = running * MONTH_S;
+			const monitor = Math.max(num('monitor'), 1);
+
+			// Litestream uploads at most once per sync interval, and only after a write.
+			const sync = Math.min(num('bursts') * 30, seconds / Math.max(num('sync'), 1));
+			const rows: [string, number][] = [
+				['Monitor write check', on('writecheck') ? seconds / monitor : 0],
+				['Monitor listing', on('listworst') ? seconds / monitor : 0],
+				['Litestream sync', sync],
+				['Litestream retention and snapshots', running > 0 ? 3 * 24 * 30 * running + 30 : 0],
+			];
+
+			let classB = running > 0 ? 5_000 : 0; // validation and restores on start
+			let storage = num('files') + 0.01; // database replica is a few MB
+			if (on('backups')) {
+				const captures = (running * 30 * 24) / Math.max(num('binterval'), 0.25);
+				rows.push(['Scheduled backups', captures * 5]);
+				classB += captures * 50;
+				const kept = Math.min(captures / 30, 24 / Math.max(num('binterval'), 0.25)) * num('bkeep');
+				storage += (kept * num('bsize')) / 1024;
+			}
+
+			const classA = rows.reduce((sum, [, n]) => sum + n, 0);
+			const tigris =
+				Math.max(0, classA - FREE.a) * PRICE.a +
+				Math.max(0, classB - FREE.b) * PRICE.b +
+				Math.max(0, storage - FREE.gb) * PRICE.gb;
+			const fly = num('machine') * running;
+			// Tigris buckets created with `fly storage create` are billed on the Fly.io invoice.
+			const waived = on('waiver') && fly + tigris < 5;
+
+			out('fly').textContent = usd(fly);
+			out('tigris').textContent = usd(tigris);
+			out('total').textContent = usd(waived ? 0 : fly + tigris);
+			out('totalLabel').textContent = waived ? 'Total (waived)' : 'Total per month';
+			root.querySelector<HTMLElement>('.backup-options')!.classList.toggle('off', !on('backups'));
+			out('rows').innerHTML = rows.map(([name, n]) => `<tr><td>${name}</td><td>${int(n)}</td></tr>`).join('');
+			out('classA').textContent = int(classA);
+			out('classB').textContent = int(classB);
+			out('storage').textContent = `${storage.toFixed(2)} GB`;
+		};
+
+		root.addEventListener('input', update);
+		update();
+	}
+</script>
+
+<style>
+	.calc {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+		gap: 1.5rem;
+		margin-block: 1.5rem;
+		padding: 1.25rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.875rem;
+		background: color-mix(in srgb, var(--sl-color-accent-low) 35%, transparent);
+	}
+	fieldset {
+		border: 0;
+		margin: 0 0 1rem;
+		padding: 0;
+	}
+	legend {
+		font-weight: 600;
+		color: var(--sl-color-white);
+		margin-bottom: 0.4rem;
+	}
+	label {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-2);
+		padding-block: 0.2rem;
+	}
+	label.check {
+		justify-content: flex-start;
+	}
+	input[type='number'] {
+		width: 6rem;
+		padding: 0.25rem 0.4rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.375rem;
+		background: var(--sl-color-black);
+		color: var(--sl-color-white);
+		font: inherit;
+		text-align: right;
+	}
+	input[type='checkbox'] {
+		accent-color: var(--sl-color-accent);
+	}
+	.tiles {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+	.tile {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 0.6rem 0.75rem;
+		border-radius: 0.5rem;
+		background: var(--sl-color-gray-6);
+	}
+	.tile span {
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+	.tile strong {
+		font-size: var(--sl-text-xl);
+		white-space: nowrap;
+		color: var(--sl-color-white);
+		font-variant-numeric: tabular-nums;
+	}
+	.tile.total {
+		background: linear-gradient(120deg, #3b82f6, #8b5cf6);
+	}
+	.tile.total span,
+	.tile.total strong {
+		color: #fff;
+	}
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--sl-text-sm);
+	}
+	th,
+	td {
+		padding: 0.3rem 0.25rem;
+		border-bottom: 1px solid var(--sl-color-gray-5);
+		text-align: left;
+	}
+	th {
+		white-space: nowrap;
+	}
+	th:last-child,
+	td:last-child {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.backup-options.off {
+		opacity: 0.45;
+	}
+	.hint {
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+		margin-top: 0.75rem;
+	}
+</style>

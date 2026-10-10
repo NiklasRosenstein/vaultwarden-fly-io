@@ -51,7 +51,7 @@ A FUSE mount can hang or disappear without Vaultwarden noticing. The monitor run
 
 - Is the GeeseFS process running, and is `/mnt/s3` still mounted? If not, the mount is **broken** immediately.
 - Can `/mnt/s3` be listed within `GEESEFS_MONITOR_TIMEOUT`? With `GEESEFS_MONITOR_WRITE_CHECK`, can a small probe
-  file be written, fsynced and read back? A failure counts toward `GEESEFS_MONITOR_FAILURE_THRESHOLD`.
+  file be written and fsynced? A failure counts toward `GEESEFS_MONITOR_FAILURE_THRESHOLD`.
 
 When the mount is considered broken, the monitor logs an error and sends `SIGTERM` to Litestream and Vaultwarden.
 After 60 seconds it sends `SIGKILL`, and the container exits with status `1`. Fly.io then restarts the machine
