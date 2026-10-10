@@ -17,6 +17,8 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from botocore.exceptions import ClientError
+
 MODULE = Path(__file__).resolve().parents[1] / "vaultwarden-fly-io" / "backup.py"
 spec = importlib.util.spec_from_file_location("backup", MODULE)
 backup = importlib.util.module_from_spec(spec)
@@ -54,12 +56,16 @@ class MemoryS3:
         return '"' + hashlib.sha256(data).hexdigest() + '"'
 
     def get_object(self, Bucket, Key, IfMatch=None):
+        if Key not in self.data:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         data = self.data[Key]
         if IfMatch and IfMatch != self.etag(data):
             raise OSError("precondition failed")
         return {"Body": io.BytesIO(data)}
 
     def head_object(self, Bucket, Key):
+        if Key not in self.data:
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         return {
             "ContentLength": len(self.data[Key]),
             "Metadata": self.metadata.get(Key, {}),
@@ -182,6 +188,8 @@ class BackupTests(unittest.TestCase):
         self.assertIn("/archives/", keys[0])
         self.assertIn("/completed/", keys[1])
         completion = json.loads(self.destination_client.data[keys[1]])
+        self.assertEqual(completion["status"], "complete")
+        self.assertEqual(completion["missing_file_count"], 0)
         self.assertEqual(next_due, backup.parse_utc(completion["captured_at"]) + 3600)
         encrypted = self.root / "archive.age"
         encrypted.write_bytes(self.destination_client.data[keys[0]])
@@ -214,11 +222,46 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(self.run_capture(), next_due)
         self.assertEqual(keys, self.destination_client.puts)
 
-    def test_missing_attachment_never_publishes(self):
-        del self.source_client.data["data/attachments/cipher/file"]
-        with self.assertRaises(FileNotFoundError):
-            self.run_capture()
-        self.assertEqual(self.destination_client.puts, [])
+    def test_missing_files_publish_degraded_recoverable_backup(self):
+        for missing_key in ("data/attachments/cipher/file", "data/sends/send/file"):
+            del self.source_client.data[missing_key]
+        next_due = self.run_capture()
+        keys = self.destination_client.puts.copy()
+        completion = json.loads(self.destination_client.data[keys[1]])
+        self.assertEqual(completion["status"], "degraded")
+        self.assertEqual(completion["missing_file_count"], 2)
+        self.assertNotIn("missing_files", completion)
+        self.assertNotIn("cipher/file", json.dumps(completion))
+        encrypted = self.root / "archive.age"
+        encrypted.write_bytes(self.destination_client.data[keys[0]])
+        decrypted = subprocess.check_output(
+            ["age", "-d", "-i", str(self.key), str(encrypted)], timeout=10
+        )
+        with tarfile.open(fileobj=io.BytesIO(decrypted), mode="r:gz") as archive:
+            manifest = json.load(archive.extractfile("vaultwarden/manifest.json"))
+            self.assertEqual(
+                manifest["missing_files"],
+                [
+                    {"path": "attachments/cipher/file", "expected_size": 10},
+                    {"path": "sends/send/file", "expected_size": 4},
+                ],
+            )
+            self.assertEqual(manifest["status"], "degraded")
+            restored = self.root / "restored.db"
+            restored.write_bytes(archive.extractfile("vaultwarden/db.sqlite3").read())
+            with closing(sqlite3.connect(restored)) as db:
+                self.assertEqual(
+                    db.execute("SELECT uuid FROM users").fetchall(), [("alice",)]
+                )
+                self.assertEqual(
+                    db.execute("SELECT count(*) FROM attachments").fetchone(), (1,)
+                )
+                self.assertEqual(
+                    db.execute("SELECT count(*) FROM sends").fetchone(), (1,)
+                )
+            self.assertIn("vaultwarden/recovery/rsa_key.pem", archive.getnames())
+        self.assertEqual(self.run_capture(), next_due)
+        self.assertEqual(self.destination_client.puts, keys)
 
     def test_truncated_attachment_never_publishes(self):
         self.source_client.data["data/attachments/cipher/file"] = b"short"
@@ -253,11 +296,78 @@ class BackupTests(unittest.TestCase):
         self.assertIsNone(backup.latest_capture(self.destination, time.time()))
         self.run_capture()
 
-    def test_archive_missing_after_completion_is_error(self):
+    def test_archive_missing_after_completion_triggers_new_capture(self):
         self.run_capture()
         del self.destination_client.data[self.destination_client.puts[0]]
-        with self.assertRaises(KeyError):
-            self.run_capture()
+        self.run_capture()
+        self.assertEqual(len(self.destination_client.puts), 4)
+
+    def test_invalid_newest_record_falls_back_to_valid_history(self):
+        next_due = self.run_capture()
+        key = self.destination_client.puts[1]
+        valid = json.loads(self.destination_client.data[key])
+        corruptions = [
+            b"not json",
+            b"x" * 65537,
+            b"null",
+            b"[]",
+            b"{}",
+            json.dumps(
+                dict(valid, captured_at=backup.utc(time.time() + 3600))
+            ).encode(),
+            json.dumps(dict(valid, schema_version=999)).encode(),
+            json.dumps(dict(valid, archive_key="outside/archive")).encode(),
+            json.dumps(dict(valid, archive_size=999)).encode(),
+        ]
+        invalid_key = self.destination.key("completed/9999-invalid.json")
+        for corruption in corruptions:
+            with self.subTest(corruption=corruption[:100]):
+                self.destination_client.data[invalid_key] = corruption
+                self.assertEqual(self.run_capture(), next_due)
+                self.assertEqual(len(self.destination_client.puts), 2)
+        # If every record is unusable, create a fresh backup.
+        del self.destination_client.data[key]
+        self.run_capture()
+        self.assertEqual(len(self.destination_client.puts), 4)
+
+    def test_disappearing_manifest_is_skipped(self):
+        self.run_capture()
+        with patch.object(
+            self.destination_client,
+            "get_object",
+            side_effect=ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject"),
+        ):
+            self.assertIsNone(backup.latest_capture(self.destination, time.time()))
+
+    def test_destination_read_errors_do_not_trigger_capture(self):
+        self.run_capture()
+        for method in ("get_object", "head_object"):
+            for code in (
+                "AccessDenied",
+                "403",
+                "InternalError",
+                "SlowDown",
+                "NoSuchBucket",
+            ):
+                with (
+                    self.subTest(method=method, code=code),
+                    patch.object(
+                        self.destination_client,
+                        method,
+                        side_effect=ClientError({"Error": {"Code": code}}, method),
+                    ),
+                ):
+                    with self.assertRaises(ClientError):
+                        self.run_capture()
+                    self.assertEqual(len(self.destination_client.puts), 2)
+
+    def test_source_download_failure_does_not_publish_degraded_backup(self):
+        with patch.object(
+            self.source_client, "get_object", side_effect=OSError("offline")
+        ):
+            with self.assertRaises(OSError):
+                self.run_capture()
+        self.assertEqual(self.destination_client.puts, [])
 
     def test_size_limit(self):
         with patch.dict(os.environ, {"BACKUP_MAX_BYTES": "1"}):
@@ -296,7 +406,7 @@ class BackupTests(unittest.TestCase):
         }
         with (
             patch.dict(os.environ, env),
-            patch.object(backup.boto3, "client") as client,
+            patch("boto3.client") as client,
         ):
             backup.s3_store(backup=True)
         self.assertEqual(client.call_args.kwargs["aws_access_key_id"], "destination")
@@ -326,13 +436,16 @@ class SupervisorTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
-    def start(self, worker, app):
+    def start(self, worker, app, setup=""):
         worker_path = self.root / "worker.py"
         worker_path.write_text(worker)
         script = (
             f"import sys; sys.path.insert(0, {str(MODULE.parent)!r}); import backup; "
-            f"backup.__file__={str(worker_path)!r}; "
-            f"sys.exit(backup.supervise([sys.executable, '-c', {app!r}]))"
+            "assert 'boto3' not in sys.modules; "
+            "import os; os.umask(0o022); "
+            f"backup.__file__={str(worker_path)!r}; {setup} "
+            f"sys.argv=['backup.py', 'supervise', sys.executable, '-c', {app!r}]; "
+            "sys.exit(backup.main())"
         )
         env = dict(
             os.environ, BACKUP_TIMEOUT_SECONDS="1", BACKUP_TMP_DIR=str(self.root)
@@ -363,7 +476,88 @@ class SupervisorTests(unittest.TestCase):
         process.communicate(timeout=10)
         self.assertEqual(process.returncode, 0)
 
+    def test_cleanup_failure_does_not_stop_app_or_start_more_captures(self):
+        starts = self.root / "starts"
+        worker = f"from pathlib import Path; Path({str(starts)!r}).open('a').write('start\\n')"
+        setup = "backup.tempfile.TemporaryDirectory.cleanup=lambda self: (_ for _ in ()).throw(OSError('failed'));"
+        process = self.start(
+            worker, "import time; time.sleep(2); raise SystemExit(7)", setup
+        )
+        _, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 7)
+        self.assertIn(b"cannot remove backup staging", stderr)
+        self.assertEqual(starts.read_text(), "start\n")
+
+    def test_unstoppable_worker_does_not_overlap(self):
+        app = Mock(returncode=7)
+        app.poll.side_effect = [None, None, None, 7, 7]
+        capture = Mock()
+        capture.poll.return_value = None
+        staging = Mock(name="staging")
+        staging.name = str(self.root)
+        with (
+            patch.object(backup.signal, "signal"),
+            patch.object(backup, "signal_group"),
+            patch.object(
+                backup.subprocess, "Popen", side_effect=[app, capture]
+            ) as spawn,
+            patch.object(backup.tempfile, "TemporaryDirectory", return_value=staging),
+            patch.object(backup, "stop_capture", return_value=False) as stop,
+            patch.object(backup.time, "monotonic", side_effect=[0, 2, 3]),
+            patch.object(backup.time, "sleep"),
+            patch.dict(os.environ, {"BACKUP_TIMEOUT_SECONDS": "1"}),
+        ):
+            self.assertEqual(backup.supervise(["app"]), 7)
+        self.assertEqual(spawn.call_count, 2)
+        self.assertEqual(
+            stop.call_count, 2
+        )  # Timeout and final shutdown, not every poll.
+        staging.cleanup.assert_not_called()
+
+    def test_stop_capture_handles_wait_timeout(self):
+        process = Mock()
+        process.wait.side_effect = subprocess.TimeoutExpired("worker", 10)
+        with patch.object(backup, "signal_group"):
+            self.assertFalse(backup.stop_capture(process))
+
+    def test_supervisor_preserves_application_umask(self):
+        output = self.root / "application-file"
+        process = self.start(
+            "raise SystemExit(1)",
+            f"from pathlib import Path; Path({str(output)!r}).touch()",
+        )
+        process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o644)
+
+    def test_worker_uses_private_umask(self):
+        observed = []
+        previous = os.umask(0o022)
+        try:
+            with (
+                patch.object(sys, "argv", ["backup.py", "once", str(self.root)]),
+                patch.object(
+                    backup,
+                    "run_once",
+                    side_effect=lambda _: observed.append(os.umask(0o077)) or 123,
+                ),
+            ):
+                self.assertEqual(backup.main(), 0)
+        finally:
+            os.umask(previous)
+        self.assertEqual(observed, [0o077])
+        self.assertEqual((self.root / "schedule.json").stat().st_mode & 0o777, 0o600)
+
     def test_sigterm_reaches_application_and_cleans_capture(self):
+        self.check_shutdown()
+        self.assertEqual(list(self.root.glob("vaultwarden-backup-*")), [])
+
+    def test_sigterm_reaches_application_even_if_staging_cleanup_fails(self):
+        self.check_shutdown(
+            "backup.tempfile.TemporaryDirectory.cleanup=lambda self: (_ for _ in ()).throw(OSError('failed'));"
+        )
+
+    def check_shutdown(self, setup=""):
         ready = self.root / "ready"
         stopped = self.root / "stopped"
         app = (
@@ -371,7 +565,7 @@ class SupervisorTests(unittest.TestCase):
             f"signal.signal(signal.SIGTERM, lambda *_: (Path({str(stopped)!r}).touch(), exit(0))); "
             f"Path({str(ready)!r}).touch(); time.sleep(60)"
         )
-        process = self.start("import time; time.sleep(60)", app)
+        process = self.start("import time; time.sleep(60)", app, setup)
         deadline = time.monotonic() + 5
         while not ready.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -380,15 +574,30 @@ class SupervisorTests(unittest.TestCase):
         process.communicate(timeout=10)
         self.assertEqual(process.returncode, 0)
         self.assertTrue(stopped.exists())
-        self.assertEqual(list(self.root.glob("vaultwarden-backup-*")), [])
+
+
+def documented_options(readme):
+    options = set()
+    in_table = False
+    for line in readme.splitlines():
+        if not line.strip().startswith("|"):
+            in_table = False
+            continue
+        cell = line.split("|")[1].strip()
+        if cell == "Variable":
+            in_table = True
+            continue
+        if not in_table or re.fullmatch(r":?-+:?", cell):
+            continue
+        if not re.fullmatch(r"(?:`[A-Z][A-Z0-9_]*`|[A-Z][A-Z0-9_]*)", cell):
+            raise ValueError(f"Unrecognized configuration option: {cell!r}")
+        options.add(cell.strip("`"))
+    return options
 
 
 class ConfigurationCoverageTests(unittest.TestCase):
     def test_every_documented_option_is_captured_or_explicitly_excluded(self):
-        readme = (MODULE.parents[1] / "README.md").read_text()
-        documented = set(
-            re.findall(r"^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|", readme, re.MULTILINE)
-        )
+        documented = documented_options((MODULE.parents[1] / "README.md").read_text())
         captured = set(backup.RECOVERY_FIELDS)
         excluded = set(backup.RECOVERY_EXCLUSIONS)
         self.assertTrue(documented)
@@ -402,14 +611,21 @@ class ConfigurationCoverageTests(unittest.TestCase):
             all(backup.RECOVERY_EXCLUSIONS.values()), "Every exclusion needs a reason"
         )
 
+    def test_documentation_parser_accepts_plain_names_and_rejects_ambiguous_rows(self):
+        header = "| Variable | Default | Description |\n| --- | --- | --- |\n"
+        self.assertEqual(
+            documented_options(header + "| PLAIN_NAME | | |\n| `QUOTED_NAME` | | |"),
+            {"PLAIN_NAME", "QUOTED_NAME"},
+        )
+        for row in ("**UNCLASSIFIED**", "FOO / BAR", "`UNMATCHED", ""):
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                documented_options(header + f"| {row} | | |")
+
     def test_entrypoint_recovery_inputs_are_classified(self):
         entrypoint = (MODULE.parent / "entrypoint.sh").read_text()
-        options = set(
-            re.findall(
-                r"\b(?:VAULTWARDEN|LITESTREAM|GEESEFS|BACKUP)_[A-Z0-9_]+\b", entrypoint
-            )
-        )
-        # These are internal paths, not operator inputs.
+        options = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)", entrypoint))
+        options.update(re.findall(r"assert_is_set\s+([A-Z][A-Z0-9_]*)", entrypoint))
+        # The entrypoint owns these paths rather than accepting them as inputs.
         options -= {"VAULTWARDEN_CONFIG_PATH", "LITESTREAM_DATABASE_PATH"}
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),

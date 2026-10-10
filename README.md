@@ -219,13 +219,15 @@ the archive format, consistency limits, destination permissions, and restore ste
 | `BACKUP_AWS_REGION` | Required when enabled | Destination signing region. |
 | `BACKUP_AWS_ENDPOINT_URL_S3` | AWS regional endpoint | Optional endpoint for an S3-compatible destination supporting conditional PUT and SHA-256 checksums. |
 | `BACKUP_AGE_RECIPIENT` | Required when enabled | Recovery public key. Keep its private key outside this deployment and Vaultwarden, separate from the Litestream Age identity. |
-| `BACKUP_INTERVAL_SECONDS` | `3600` | Time between successful capture start timestamps, persisted through S3 completion manifests. |
+| `BACKUP_INTERVAL_SECONDS` | `3600` | Time between published capture start timestamps (including degraded backups), persisted through S3 completion manifests. |
 | `BACKUP_TIMEOUT_SECONDS` | `1800` | Maximum time per scheduling check/capture/upload attempt. |
 | `BACKUP_MAX_BYTES` | `1073741824` | Maximum captured payload bytes; at most 4 GiB. Archives use a single S3 PUT. |
 | `BACKUP_TMP_DIR` | System temporary directory | Private staging directory parent. Provision at least twice the payload size in free disk space. |
 
-On startup, the worker reads the latest completed backup from S3 and waits until its next due time. It captures
-immediately if no completed backup exists or the interval has elapsed. Failed checks/captures retry with backoff
+On startup, the worker reads the latest usable completion record from S3 and waits until its next due time. It
+skips invalid records and captures immediately if no usable record exists or the interval has elapsed. Missing
+referenced files produce a degraded archive with recovery details; both complete and degraded archives advance
+the schedule. Monitor freshness and degraded status separately. Failed checks/captures retry with backoff
 without restarting Vaultwarden; an unavailable destination is never treated as an empty backup history. Only one
 capture runs at a time. Keep the application running to meet the interval: a stopped Fly Machine cannot run backups.
 

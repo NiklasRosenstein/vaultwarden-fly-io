@@ -18,9 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import urlopen
 
-import boto3
-from botocore.config import Config
-
 LOG = logging.getLogger("backup")
 SCHEMA_VERSION = 1
 DATA_DIR = Path("/data")
@@ -44,6 +41,7 @@ VAULTWARDEN_PUSH_INSTALLATION_ID VAULTWARDEN_PUSH_INSTALLATION_KEY
 VAULTWARDEN_YUBICO_CLIENT_ID VAULTWARDEN_YUBICO_SECRET_KEY
 """.split()
 RECOVERY_EXCLUSIONS = {
+    "FLY_APP_NAME": "Recovery records the effective VAULTWARDEN_DOMAIN instead.",
     "ENTRYPOINT_IDLE": "Would prevent the recovered application from starting.",
     "IMPORT_DATABASE": "One-time import must be chosen explicitly during recovery.",
     "BACKUP_ENABLED": "Enable backups explicitly after validating the recovered service.",
@@ -125,6 +123,9 @@ class Store:
 
 
 def s3_store(backup=False):
+    import boto3
+    from botocore.config import Config
+
     # Explicit credentials prevent destination requests from using source AWS credentials.
     prefix = "BACKUP_" if backup else ""
     client = boto3.client(
@@ -149,14 +150,7 @@ def s3_store(backup=False):
     )
 
 
-def latest_capture(store, now):
-    records = [
-        obj for obj in store.objects("completed/") if obj["Key"].endswith(".json")
-    ]
-    if not records:
-        return None
-    # IDs start with a UTC capture timestamp. Do not trust incomplete uploads or local disk state.
-    key = max(obj["Key"] for obj in records)
+def read_completion(store, key, now):
     response = store.client.get_object(Bucket=store.bucket, Key=key)
     with closing(response["Body"]) as body:
         raw = body.read(65537)
@@ -164,10 +158,19 @@ def latest_capture(store, now):
         raise BackupError("completion manifest too large")
     record = json.loads(raw)
     captured = parse_utc(record["captured_at"])
-    if record["schema_version"] != SCHEMA_VERSION or captured > now:
+    if record["schema_version"] != SCHEMA_VERSION or not 0 <= captured <= now:
         raise BackupError("invalid completion manifest")
     if not record["archive_key"].startswith(store.key("archives/")):
         raise BackupError("archive outside backup prefix")
+    checksum = record["archive_sha256"]
+    if (
+        type(record["archive_size"]) is not int
+        or record["archive_size"] <= 0
+        or not isinstance(checksum, str)
+        or len(checksum) != 64
+        or any(char not in "0123456789abcdef" for char in checksum)
+    ):
+        raise BackupError("invalid archive metadata")
     head = store.client.head_object(Bucket=store.bucket, Key=record["archive_key"])
     if (
         head["ContentLength"] != record["archive_size"]
@@ -175,6 +178,31 @@ def latest_capture(store, now):
     ):
         raise BackupError("completed archive does not match manifest")
     return captured
+
+
+def latest_capture(store, now):
+    from botocore.exceptions import ClientError
+
+    records = sorted(
+        (
+            obj["Key"]
+            for obj in store.objects("completed/")
+            if obj["Key"].endswith(".json")
+        ),
+        reverse=True,
+    )
+    # IDs start with a UTC capture timestamp. Invalid history must not prevent new captures.
+    for key in records:
+        try:
+            return read_completion(store, key, now)
+        except ClientError as error:
+            # Access, transport and service failures are not evidence of a missing archive.
+            if error.response["Error"]["Code"] not in ("NoSuchKey", "NotFound", "404"):
+                raise
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
+            pass
+        LOG.warning("skipping unusable backup completion record")
+    return None
 
 
 def snapshot_database(source, destination):
@@ -243,9 +271,16 @@ def validate_files(database, files):
         for ident, data in db.execute("SELECT uuid, data FROM sends WHERE atype=1"):
             data = {key.lower(): value for key, value in json.loads(data).items()}
             expected.append((f"sends/{ident}/{data['id']}", int(data["size"])))
+    missing = []
     for name, size in expected:
-        if safe_path(files, name).stat().st_size != size:
+        try:
+            actual = safe_path(files, name).stat().st_size
+        except FileNotFoundError:
+            missing.append({"path": name, "expected_size": size})
+            continue
+        if actual != size:
             raise BackupError("referenced file size mismatch")
+    return missing
 
 
 def capture_recovery(destination):
@@ -358,7 +393,7 @@ def run_once(work):
     files = payload / "files"
     files.mkdir()
     capture_files(s3_store(), files, maximum - database.stat().st_size)
-    validate_files(database, files)
+    missing = validate_files(database, files)
     recovery = payload / "recovery"
     recovery.mkdir()
     capture_recovery(recovery)
@@ -373,6 +408,8 @@ def run_once(work):
         "captured_at": utc(captured),
         "database_capture_finished_at": utc(database_finished),
         "vaultwarden_version": version,
+        "status": "degraded" if missing else "complete",
+        "missing_file_count": len(missing),
     }
     entries = {
         str(path.relative_to(payload)): {
@@ -384,13 +421,22 @@ def run_once(work):
     }
     if sum(entry["size"] for entry in entries.values()) > maximum:
         raise BackupError("backup exceeds BACKUP_MAX_BYTES")
-    write_json(payload / "manifest.json", dict(record, files=entries))
+    write_json(
+        payload / "manifest.json", dict(record, files=entries, missing_files=missing)
+    )
     archive = work / "backup.tar.age"
     LOG.info("encrypting archive")
     encrypt_archive(payload, archive, recipient)
     LOG.info("uploading archive")
     publish(destination, archive, record)
-    LOG.info("backup completed id=%s captured_at=%s", backup_id, record["captured_at"])
+    LOG.log(
+        logging.WARNING if missing else logging.INFO,
+        "backup published id=%s captured_at=%s status=%s missing_file_count=%s",
+        backup_id,
+        record["captured_at"],
+        record["status"],
+        len(missing),
+    )
     return captured + interval
 
 
@@ -403,8 +449,24 @@ def signal_group(process, signum):
 
 def stop_capture(process):
     # Captures have no persistent local state; terminate age and any other children too.
-    signal_group(process, signal.SIGKILL)
-    process.wait(timeout=10)
+    try:
+        signal_group(process, signal.SIGKILL)
+        process.wait(timeout=10)
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+        LOG.error(
+            "cannot stop backup worker; further captures suspended until it exits"
+        )
+        return False
+
+
+def cleanup_staging(staging):
+    try:
+        staging.cleanup()
+        return True
+    except OSError:
+        LOG.error("cannot remove backup staging; further captures suspended")
+        return False
 
 
 def supervise(command):
@@ -425,8 +487,8 @@ def supervise(command):
             now = time.monotonic()
             if capture is not None:
                 timed_out = now >= deadline
-                if timed_out:
-                    stop_capture(capture)
+                if timed_out and not stop_capture(capture):
+                    deadline = float("inf")
                 if capture.poll() is not None:
                     success = capture.returncode == 0 and not timed_out
                     if success:
@@ -447,8 +509,11 @@ def supervise(command):
                             timed_out,
                             delay,
                         )
-                    staging.cleanup()
-                    staging, capture = None, None
+                    if cleanup_staging(staging):
+                        staging = None
+                    else:
+                        due = float("inf")
+                    capture = None
             if capture is None and now >= due:
                 try:
                     deadline = now + positive_int("BACKUP_TIMEOUT_SECONDS", 1800)
@@ -461,17 +526,18 @@ def supervise(command):
                         start_new_session=True,
                     )
                 except (OSError, ValueError):
-                    if staging is not None:
-                        staging.cleanup()
-                        staging = None
                     due = now + 60
-                    LOG.error("cannot start backup worker; retrying in 60 seconds")
+                    if staging is not None:
+                        if cleanup_staging(staging):
+                            staging = None
+                        else:
+                            due = float("inf")
+                    LOG.error("cannot start backup worker")
             time.sleep(0.5)
     finally:
-        if capture is not None:
-            stop_capture(capture)
-        if staging is not None:
-            staging.cleanup()
+        capture_stopped = capture is None or stop_capture(capture)
+        if staging is not None and capture_stopped:
+            cleanup_staging(staging)
         if app.poll() is None:
             # Litestream forwards termination to its managed Vaultwarden process.
             app.send_signal(signal.SIGTERM)
@@ -485,7 +551,6 @@ def supervise(command):
 
 
 def main():
-    os.umask(0o077)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s level=%(levelname)s component=backup %(message)s",
@@ -493,6 +558,7 @@ def main():
     if sys.argv[1] == "supervise":
         return supervise(sys.argv[2:])
     if sys.argv[1] == "once":
+        os.umask(0o077)
         try:
             work = Path(sys.argv[2])
             write_json(work / "schedule.json", {"next_due": run_once(work)})
