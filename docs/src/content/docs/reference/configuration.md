@@ -96,7 +96,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 | --- | --- | --- |
 | `AGE_SECRET_KEY` | required | age identity that encrypts the replica. Keep a copy outside Fly.io. |
 | `LITESTREAM_ENABLED` | `true` | Restore and replicate the database with Litestream. If you turn this off, the database is lost on every restart. |
-| `LITESTREAM_SYNC_INTERVAL` | `10s` | How often changes are pushed to the replica. Litestream's own default is `1s`. Shorter intervals mean more S3 requests and higher cost. |
+| `LITESTREAM_SYNC_INTERVAL` | `10s` | How often changes are pushed to the replica. Litestream's own default is `1s`. This image uses `10s` to cap the number of S3 requests, see the [cost model](../costs/#litestream-sync-interval). Lower it to shrink the window of changes lost on a crash. |
 | `LITESTREAM_RETENTION` | `24h` | How long snapshots and WAL segments are kept. |
 | `LITESTREAM_RETENTION_CHECK_INTERVAL` | `1h` | How often retention is enforced. |
 | `LITESTREAM_VALIDATION_INTERVAL` | `12h` | How often Litestream restores the replica separately and compares it with the live database. |
@@ -116,9 +116,9 @@ the same name, without the `VAULTWARDEN_` prefix.
 | `GEESEFS_MONITOR_INTERVAL` | `30` | Seconds between checks. |
 | `GEESEFS_MONITOR_TIMEOUT` | `20` | Seconds after which a check is considered hung. |
 | `GEESEFS_MONITOR_FAILURE_THRESHOLD` | `3` | Consecutive failed checks before the mount is considered broken. |
-| `GEESEFS_MONITOR_WRITE_CHECK` | `true` | Also write, fsync and read back `/mnt/s3/.s3-monitor-<machine id>` on every check. That is one S3 upload per check. Set it to `false` to only list the directory. |
+| `GEESEFS_MONITOR_WRITE_CHECK` | `true` | Also write, fsync and read back `/mnt/s3/.s3-monitor-<machine id>` on every check. That is one S3 upload per check, 86,400 a month at the default interval (see the [cost model](../costs/)). Set it to `false` to only list the directory. |
 
-## Scheduled recovery backups
+## Scheduled backups
 
 See the [backups guide](../../guides/backups/) for how these fit together.
 
@@ -142,5 +142,5 @@ See the [backups guide](../../guides/backups/) for how these fit together.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `IMPORT_DATABASE` | `false` | Load `import-db.sqlite` from the bucket instead of running `litestream restore`. Used for [migrations](../../guides/migration/). Turn it off as soon as replication has succeeded. |
+| `IMPORT_DATABASE` | unset | Key of an SQLite database in the bucket, for example `import-db.sqlite`. If set, it is loaded instead of running `litestream restore`. Used for [migrations](../../guides/migration/). Unset it as soon as replication has succeeded. |
 | `ENTRYPOINT_IDLE` | `false` | Idle before starting the application, or when startup fails, so you can `fly ssh console` in to debug. Fly.io may stop the machine after a while. |

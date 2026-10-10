@@ -1,0 +1,149 @@
+---
+title: Docker and Kubernetes
+description: Run the same image outside Fly.io, on Docker or Kubernetes, with any S3-compatible bucket.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The image is built for Fly.io, but nothing in it requires Fly.io. It runs anywhere a container can mount a FUSE
+filesystem, with any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, Tigris and others).
+
+## Requirements
+
+- **FUSE.** GeeseFS mounts the bucket at `/mnt/s3`. The container needs the `/dev/fuse` device and the `SYS_ADMIN`
+  capability. Some hosts also need AppArmor relaxed for the container.
+- **Exactly one replica.** Litestream must be the only writer of the replica. Never run two containers against the
+  same bucket at the same time, not even briefly during an update.
+- **No persistent volume.** State lives in the bucket. The container filesystem may be thrown away at any time.
+- **`VAULTWARDEN_DOMAIN`.** On Fly.io it defaults to `https://<app>.fly.dev`. Elsewhere, always set it.
+
+All other options are the same as on Fly.io. See the [configuration reference](../../reference/configuration/).
+Vaultwarden listens on port `8080`.
+
+## Docker
+
+```sh
+docker run -d --name vaultwarden \
+  --device /dev/fuse \
+  --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined \
+  --restart on-failure \
+  -p 8080:8080 \
+  --env-file vaultwarden.env \
+  ghcr.io/niklasrosenstein/vaultwarden-fly-io:<version>
+```
+
+```sh title="vaultwarden.env"
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=auto
+AWS_ENDPOINT_URL_S3=https://s3.example.com
+BUCKET_NAME=vaultwarden
+AGE_SECRET_KEY=AGE-SECRET-KEY-1...
+VAULTWARDEN_DOMAIN=https://vault.example.com
+VAULTWARDEN_ADMIN_TOKEN=$argon2id$...
+```
+
+`VAULTWARDEN_RSA_PRIVATE_KEY` spans several lines, which an env file can't hold. Pass it with
+`-e VAULTWARDEN_RSA_PRIVATE_KEY="$(cat rsa_key.pem)"`.
+
+Put a reverse proxy that terminates TLS in front of port `8080`. Set `VAULTWARDEN_IP_HEADER` to the header your proxy
+sets, for example `X-Forwarded-For`.
+
+## Kubernetes
+
+A `Deployment` with one replica and the `Recreate` strategy makes sure the old pod is gone before the new one starts.
+
+<Tabs>
+<TabItem label="Deployment">
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultwarden
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # never run two writers at once
+  selector:
+    matchLabels: { app: vaultwarden }
+  template:
+    metadata:
+      labels: { app: vaultwarden }
+    spec:
+      # Give Litestream time to upload its last changes on shutdown.
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: vaultwarden
+          image: ghcr.io/niklasrosenstein/vaultwarden-fly-io:<version>
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef: { name: vaultwarden }
+          env:
+            - name: VAULTWARDEN_DOMAIN
+              value: https://vault.example.com
+          securityContext:
+            privileged: true # for /dev/fuse, see the note below
+          readinessProbe:
+            httpGet: { path: /alive, port: 8080 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { memory: 512Mi }
+```
+
+</TabItem>
+<TabItem label="Secret">
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vaultwarden
+stringData:
+  AWS_ACCESS_KEY_ID: "..."
+  AWS_SECRET_ACCESS_KEY: "..."
+  AWS_REGION: auto
+  AWS_ENDPOINT_URL_S3: https://s3.example.com
+  BUCKET_NAME: vaultwarden
+  AGE_SECRET_KEY: AGE-SECRET-KEY-1...
+  VAULTWARDEN_ADMIN_TOKEN: $argon2id$...
+  VAULTWARDEN_RSA_PRIVATE_KEY: |
+    -----BEGIN PRIVATE KEY-----
+    ...
+    -----END PRIVATE KEY-----
+```
+
+</TabItem>
+<TabItem label="Service">
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vaultwarden
+spec:
+  selector: { app: vaultwarden }
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+Expose it with your usual `Ingress` or `Gateway` and TLS setup.
+
+</TabItem>
+</Tabs>
+
+<Aside title="Avoiding a privileged container">
+`privileged: true` is the simplest way to get FUSE into a pod. If your cluster runs a device plugin that exposes
+`/dev/fuse`, request the device as a resource instead, and add only the `SYS_ADMIN` capability.
+</Aside>
+
+**Restarts.** When the [S3 mount monitor](../../reference/architecture/#s3-mount-monitor) finds a broken mount, the
+container exits with status `1`, and the kubelet starts a fresh container that mounts the bucket again. No liveness
+probe is needed for this.
+
+**Backups.** The [scheduled backup worker](../backups/) works the same way. With a pod that always runs, backups
+happen on schedule.

@@ -1,5 +1,5 @@
 ---
-title: Scheduled recovery backups
+title: Scheduled backups
 description: Write age-encrypted, self-contained archives of your vault to a separate S3 bucket on a schedule.
 ---
 
@@ -42,7 +42,7 @@ Vaultwarden keeps serving requests during the capture. To restore an archive, se
      BACKUP_AGE_RECIPIENT=age1...
    ```
 
-   All options are listed in the [configuration reference](../../reference/configuration/#scheduled-recovery-backups).
+   All options are listed in the [configuration reference](../../reference/configuration/#scheduled-backups).
 
 :::caution[Keep the machine running]
 A stopped Fly Machine can't run backups. To meet the interval, set `min_machines_running = 1` or turn off

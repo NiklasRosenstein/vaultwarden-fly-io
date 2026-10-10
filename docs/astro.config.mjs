@@ -38,11 +38,11 @@ export default defineConfig({
 				},
 				{
 					label: 'Guides',
-					items: ['guides/migration', 'guides/backups', 'guides/recovery'],
+					items: ['guides/migration', 'guides/backups', 'guides/recovery', 'guides/kubernetes'],
 				},
 				{
 					label: 'Reference',
-					items: ['reference/configuration', 'reference/architecture'],
+					items: ['reference/configuration', 'reference/architecture', 'reference/costs'],
 				},
 				{ label: 'Development', link: '/development/' },
 			],

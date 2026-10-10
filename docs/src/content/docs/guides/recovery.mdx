@@ -42,7 +42,7 @@ private key (`recovery-key.txt`) and access to the backup destination.
    if you can.
 
 5. **Restore**, following the [migration guide](../migration/):
-   - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=true`. A standard Vaultwarden
+   - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=import-db.sqlite`. A standard Vaultwarden
      deployment can also use the file directly.
    - Upload `files/attachments/` and `files/sends/` under `data/` in a **fresh** bucket.
    - Use the Vaultwarden version recorded in the manifest first, and keep the same domain and signing key.

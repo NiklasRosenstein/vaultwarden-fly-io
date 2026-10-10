@@ -1,6 +1,6 @@
 ---
 title: Vaultwarden on Fly.io
-description: Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted recovery backups.
+description: Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted scheduled backups.
 template: splash
 hero:
   tagline: Your own Bitwarden-compatible password manager on a tiny Fly Machine, for about 2 USD a month. SQLite is replicated to S3 by Litestream, so the VM itself is disposable.
@@ -23,8 +23,8 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 <CardGrid>
 	<Card title="Cheap to run" icon="star">
-		The smallest `shared-cpu-1x` VM plus the Tigris free tier costs roughly 2 USD a month. Fly.io stops the machine
-		when nobody uses it, so you often pay less.
+		The smallest `shared-cpu-1x` VM costs about 2 USD a month, and Fly.io stops it when nobody uses it. On a personal
+		account, Fly.io has so far waived invoices under 5 USD. Storage and requests usually fit Tigris's free tier.
 	</Card>
 	<Card title="No volumes" icon="seti:db">
 		The SQLite database is restored from S3 on boot and continuously replicated back with
@@ -42,7 +42,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 		A monitor watches the S3 mount and restarts the machine when the mount breaks. It holds off while the S3
 		provider itself is down.
 	</Card>
-	<Card title="Recovery backups" icon="laptop">
+	<Card title="Scheduled backups" icon="laptop">
 		An optional worker writes age-encrypted, self-contained archives of your vault to a separate bucket on a
 		schedule.
 	</Card>
@@ -54,5 +54,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 	<LinkCard title="Installation" description="Deploy your first instance in seven steps." href="getting-started/installation/" />
 	<LinkCard title="Migrate an existing instance" description="Bring your database, keys and attachments along." href="guides/migration/" />
 	<LinkCard title="Configuration reference" description="Every environment variable the image understands." href="reference/configuration/" />
+	<LinkCard title="Cost model" description="Napkin math for Fly.io and S3 request costs." href="reference/costs/" />
+	<LinkCard title="Docker and Kubernetes" description="Run the same image anywhere FUSE is available." href="guides/kubernetes/" />
 	<LinkCard title="How it works" description="Where each file in /data actually lives." href="reference/architecture/" />
 </CardGrid>

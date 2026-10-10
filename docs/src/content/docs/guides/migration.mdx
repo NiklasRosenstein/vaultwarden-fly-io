@@ -21,23 +21,23 @@ points at your bucket. Any S3 client works.
    PRAGMA wal_checkpoint(TRUNCATE);
    ```
 
-3. **Upload the database** to the bucket under the key `import-db.sqlite`, then deploy with `IMPORT_DATABASE`
-   enabled. On startup the image loads that file instead of running `litestream restore`.
+3. **Upload the database** to the bucket, then deploy with `IMPORT_DATABASE` set to its key. On startup the image
+   downloads that file instead of running `litestream restore`.
 
    ```sh
    mc cp db.sqlite3 tigris/<bucket>/import-db.sqlite
-   fly deploy --env IMPORT_DATABASE=true
+   fly deploy --env IMPORT_DATABASE=import-db.sqlite
    ```
 
 4. **Check the logs** (`fly logs`). Confirm that the database was imported from the bucket and that Litestream
-   finished replicating it. Then deploy again **without** the flag:
+   finished replicating it. Then deploy again **without** the variable:
 
    ```sh
    fly deploy
    ```
 
    <Aside type="caution">
-   Don't leave `IMPORT_DATABASE` enabled. On every restart it would overwrite the live database with the imported
+   Don't leave `IMPORT_DATABASE` set. On every restart it would overwrite the live database with the imported
    snapshot.
    </Aside>
 

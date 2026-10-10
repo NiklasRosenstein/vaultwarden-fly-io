@@ -28,7 +28,7 @@ Vaultwarden encrypts attachments and Sends itself, so the objects are stored wit
 │   ├── attachments/
 │   ├── sends/
 │   └── icon_cache/
-└── import-db.sqlite     only during a migration
+└── import-db.sqlite     only during a migration (see IMPORT_DATABASE)
 ```
 
 ## Startup sequence
@@ -37,7 +37,7 @@ Vaultwarden encrypts attachments and Sends itself, so the objects are stored wit
 2. Write the RSA key pair from `VAULTWARDEN_RSA_PRIVATE_KEY`.
 3. Generate `config.json` from `VAULTWARDEN_*` variables and check that it is valid JSON.
 4. Idle here if `ENTRYPOINT_IDLE=true`.
-5. Restore the database with Litestream, or load `import-db.sqlite` if `IMPORT_DATABASE=true`.
+5. Restore the database with Litestream, or load the database from the bucket key named by `IMPORT_DATABASE`, if it is set.
 6. Start Vaultwarden under Litestream replication, plus the S3 monitor and the
    [backup worker](../../guides/backups/) if enabled.
 
