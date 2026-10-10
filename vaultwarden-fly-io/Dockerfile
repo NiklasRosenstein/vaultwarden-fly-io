@@ -13,11 +13,11 @@ RUN arch=$(cat /tmp/arch) &&\
     chmod +x geesefs
 
 FROM ghcr.io/dani-garcia/vaultwarden:1.37.2-alpine
-RUN apk add age envsubst fuse jq openssl sudo
+RUN apk add age envsubst fuse jq minio-client openssl sudo && \
+    ln -s /usr/bin/mcli /usr/bin/mc
 COPY --from=litestream /litestream /usr/bin/litestream
 COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.3-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
 COPY --from=geesefs /geesefs /usr/bin/geesefs
-COPY --from=minio/mc:RELEASE.2024-10-02T08-27-28Z /usr/bin/mc /usr/bin/mc
 COPY entrypoint.sh .
 
 # NOTE: I tried to make this work, but mounting a directory with GeeseFS and using the --uid option seems to break
