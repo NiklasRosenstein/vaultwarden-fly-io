@@ -1,0 +1,206 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Cost model | Vaultwarden on Fly.io</title><link rel="canonical" href="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/costs/"/><link rel="sitemap" href="/vaultwarden-fly-io/sitemap-index.xml"/><link rel="shortcut icon" href="/vaultwarden-fly-io/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.8"/><meta name="generator" content="Starlight v0.42.6"/><meta property="og:title" content="Cost model"/><meta property="og:type" content="article"/><meta property="og:url" content="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/costs/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Estimate what an instance costs on Fly.io and Tigris, and which settings move the numbers."/><meta property="og:site_name" content="Vaultwarden on Fly.io"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Estimate what an instance costs on Fly.io and Tigris, and which settings move the numbers."/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/vaultwarden-fly-io/assets/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/vaultwarden-fly-io/assets/common.D95o8Sur.css"><style>@layer starlight.components{svg:where(.astro-hkc32dio){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em;overflow:visible}}
+</style><script type="module" src="/vaultwarden-fly-io/assets/page.cNngjUgL.js"></script><style>.calc:where(.astro-owrubcf7){border:1px solid var(--sl-color-gray-5);background:color-mix(in srgb, var(--sl-color-accent-low) 35%, transparent);border-radius:.875rem;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:1.5rem;margin-block:1.5rem;padding:1.25rem;display:grid}fieldset:where(.astro-owrubcf7){border:0;margin:0 0 1rem;padding:0}legend:where(.astro-owrubcf7){color:var(--sl-color-white);margin-bottom:.4rem;font-weight:600}label:where(.astro-owrubcf7){font-size:var(--sl-text-sm);color:var(--sl-color-gray-2);justify-content:space-between;align-items:center;gap:.75rem;padding-block:.2rem;display:flex}label:where(.astro-owrubcf7).check{justify-content:flex-start}input:where(.astro-owrubcf7)[type=number]{border:1px solid var(--sl-color-gray-5);background:var(--sl-color-black);width:6rem;color:var(--sl-color-white);font:inherit;text-align:right;border-radius:.375rem;padding:.25rem .4rem}input:where(.astro-owrubcf7)[type=checkbox]{accent-color:var(--sl-color-accent)}.tiles:where(.astro-owrubcf7){grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:1rem;display:grid}.tile:where(.astro-owrubcf7){background:var(--sl-color-gray-6);border-radius:.5rem;flex-direction:column;gap:.25rem;padding:.6rem .75rem;display:flex}.tile:where(.astro-owrubcf7) span:where(.astro-owrubcf7){font-size:var(--sl-text-xs);color:var(--sl-color-gray-3)}.tile:where(.astro-owrubcf7) strong:where(.astro-owrubcf7){font-size:var(--sl-text-xl);white-space:nowrap;color:var(--sl-color-white);font-variant-numeric:tabular-nums}.tile:where(.astro-owrubcf7).total{background:linear-gradient(120deg,#3b82f6,#8b5cf6)}.tile:where(.astro-owrubcf7).total span:where(.astro-owrubcf7),.tile:where(.astro-owrubcf7).total strong:where(.astro-owrubcf7){color:#fff}table:where(.astro-owrubcf7){border-collapse:collapse;width:100%;font-size:var(--sl-text-sm)}th:where(.astro-owrubcf7),td:where(.astro-owrubcf7){border-bottom:1px solid var(--sl-color-gray-5);text-align:left;padding:.3rem .25rem}th:where(.astro-owrubcf7){white-space:nowrap}th:where(.astro-owrubcf7):last-child,td:where(.astro-owrubcf7):last-child{text-align:right;font-variant-numeric:tabular-nums}.backup-options:where(.astro-owrubcf7).off{opacity:.45}.hint:where(.astro-owrubcf7){font-size:var(--sl-text-xs);color:var(--sl-color-gray-3);margin-top:.75rem}
+</style></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/vaultwarden-fly-io/" class="site-title sl-flex astro-6rvad3va"><img class="astro-6rvad3va" alt src="/vaultwarden-fly-io/assets/logo.BtvrL5L4.svg" width="64" height="64"><span class="astro-6rvad3va" translate="no">Vaultwarden on Fly.io</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/vaultwarden-fly-io/assets/Search.astro_astro_type_script_index_0_lang.DSnAWlXe.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><a href="https://github.com/NiklasRosenstein/vaultwarden-fly-io" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="082cjtj" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Getting started</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/getting-started/introduction/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Introduction</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/getting-started/installation/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Installation</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Guides</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/guides/migration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Migrate an existing instance</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/guides/backups/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scheduled backups</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/guides/recovery/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Recovery</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/guides/kubernetes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Docker and Kubernetes</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Reference</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/reference/configuration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/reference/architecture/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Architecture</span></a></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/reference/costs/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Cost model</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><a href="/vaultwarden-fly-io/development/" class="large astro-rmhv4bp6"><span class="astro-rmhv4bp6">Development</span></a></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><a href="https://github.com/NiklasRosenstein/vaultwarden-fly-io" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#flyio" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Fly.io</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#tigris" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Tigris</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#litestream-sync-interval" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Litestream sync interval</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#typical-totals" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Typical totals</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/vaultwarden-fly-io/assets/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#flyio" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Fly.io</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#tigris" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Tigris</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#litestream-sync-interval" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Litestream sync interval</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#typical-totals" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Typical totals</span></a></li></ul></nav></starlight-toc><script type="module" src="/vaultwarden-fly-io/assets/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Cost model</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content">
+<p>You pay for the <strong>Fly Machine</strong> that runs Vaultwarden and the <strong>S3 bucket</strong> behind it. Tigris buckets created with
+<code dir="auto">fly storage create</code> are billed on the same Fly.io invoice. For a personal vault both are small, and most of the S3
+bill comes from requests, not storage.</p>
+<div class="calc not-content astro-owrubcf7" data-cost-calculator><div class="inputs astro-owrubcf7"><fieldset class="astro-owrubcf7"><legend class="astro-owrubcf7">Fly.io</legend><label class="astro-owrubcf7">Hours running per day <input type="number" name="hours" value="24" min="0" max="24" step="0.5" class="astro-owrubcf7"></label><label class="astro-owrubcf7">Machine price, 24/7 (USD/month) <input type="number" name="machine" value="2" min="0" step="0.1" class="astro-owrubcf7"></label><label class="check astro-owrubcf7"><input type="checkbox" name="waiver" checked class="astro-owrubcf7"> Personal org: invoices under 5 USD waived</label></fieldset><fieldset class="astro-owrubcf7"><legend class="astro-owrubcf7">Litestream</legend><label class="astro-owrubcf7">Sync interval (seconds) <input type="number" name="sync" value="10" min="1" step="1" class="astro-owrubcf7"></label><label class="astro-owrubcf7">Write bursts per day <input type="number" name="bursts" value="300" min="0" step="10" class="astro-owrubcf7"></label></fieldset><fieldset class="astro-owrubcf7"><legend class="astro-owrubcf7">S3 mount monitor</legend><label class="astro-owrubcf7">Check interval (seconds) <input type="number" name="monitor" value="30" min="1" step="1" class="astro-owrubcf7"></label><label class="check astro-owrubcf7"><input type="checkbox" name="writecheck" checked class="astro-owrubcf7"> Write check</label><label class="check astro-owrubcf7"><input type="checkbox" name="listworst" checked class="astro-owrubcf7"> Every listing hits S3 (worst case)</label></fieldset><fieldset class="astro-owrubcf7"><legend class="astro-owrubcf7">Storage and backups</legend><label class="astro-owrubcf7">Attachments and Sends (GB) <input type="number" name="files" value="0.1" min="0" step="0.1" class="astro-owrubcf7"></label><label class="check astro-owrubcf7"><input type="checkbox" name="backups" class="astro-owrubcf7"> Scheduled backups (same Tigris account)</label><div class="backup-options astro-owrubcf7"><label class="astro-owrubcf7">Backup interval (hours) <input type="number" name="binterval" value="1" min="0.25" step="0.25" class="astro-owrubcf7"></label><label class="astro-owrubcf7">Archive size (MB) <input type="number" name="bsize" value="50" min="0" step="10" class="astro-owrubcf7"></label><label class="astro-owrubcf7">Keep archives for (days) <input type="number" name="bkeep" value="30" min="1" step="1" class="astro-owrubcf7"></label></div></fieldset></div><div class="results astro-owrubcf7"><div class="tiles astro-owrubcf7"><div class="tile astro-owrubcf7"><span class="astro-owrubcf7">Fly.io</span><strong data-out="fly" class="astro-owrubcf7">–</strong></div><div class="tile astro-owrubcf7"><span class="astro-owrubcf7">Tigris</span><strong data-out="tigris" class="astro-owrubcf7">–</strong></div><div class="tile total astro-owrubcf7"><span data-out="totalLabel" class="astro-owrubcf7">Total per month</span><strong data-out="total" class="astro-owrubcf7">–</strong></div></div><table class="astro-owrubcf7"><thead class="astro-owrubcf7"><tr class="astro-owrubcf7"><th class="astro-owrubcf7">Class A requests</th><th class="astro-owrubcf7">per month</th></tr></thead><tbody data-out="rows" class="astro-owrubcf7"></tbody><tfoot class="astro-owrubcf7"><tr class="astro-owrubcf7"><th class="astro-owrubcf7">Total (10,000 free)</th><th data-out="classA" class="astro-owrubcf7"></th></tr><tr class="astro-owrubcf7"><td class="astro-owrubcf7">Class B requests (100,000 free)</td><td data-out="classB" class="astro-owrubcf7"></td></tr><tr class="astro-owrubcf7"><td class="astro-owrubcf7">Storage (5 GB free)</td><td data-out="storage" class="astro-owrubcf7"></td></tr></tfoot></table><p class="hint astro-owrubcf7">Estimates for a 30-day month at the prices on this page. Real usage varies.</p></div></div><script type="module">var e={a:.005/1e3,b:5e-4/1e3,gb:.02},t={a:1e4,b:1e5,gb:5},n=e=>`$${e.toFixed(2)}`,r=e=>Math.round(e).toLocaleString(`en-US`);for(let i of document.querySelectorAll(`[data-cost-calculator]`)){let a=e=>i.querySelector(`[name="${e}"]`),o=e=>Math.max(0,Number(a(e).value)||0),s=e=>a(e).checked,c=e=>i.querySelector(`[data-out="${e}"]`),l=()=>{let a=Math.min(o(`hours`),24)/24,l=a*2592e3,u=Math.max(o(`monitor`),1),d=Math.min(o(`bursts`)*30,l/Math.max(o(`sync`),1)),f=[[`Monitor write check`,s(`writecheck`)?l/u:0],[`Monitor listing`,s(`listworst`)?l/u:0],[`Litestream sync`,d],[`Litestream retention and snapshots`,a>0?2160*a+30:0]],p=a>0?5e3:0,m=o(`files`)+.01;if(s(`backups`)){let e=a*30*24/Math.max(o(`binterval`),.25);f.push([`Scheduled backups`,e*5]),p+=e*50;let t=Math.min(e/30,24/Math.max(o(`binterval`),.25))*o(`bkeep`);m+=t*o(`bsize`)/1024}let h=f.reduce((e,[,t])=>e+t,0),g=Math.max(0,h-t.a)*e.a+Math.max(0,p-t.b)*e.b+Math.max(0,m-t.gb)*e.gb,_=o(`machine`)*a,v=s(`waiver`)&&_+g<5;c(`fly`).textContent=n(_),c(`tigris`).textContent=n(g),c(`total`).textContent=n(v?0:_+g),c(`totalLabel`).textContent=v?`Total (waived)`:`Total per month`,i.querySelector(`.backup-options`).classList.toggle(`off`,!s(`backups`)),c(`rows`).innerHTML=f.map(([e,t])=>`<tr><td>${e}</td><td>${r(t)}</td></tr>`).join(``),c(`classA`).textContent=r(h),c(`classB`).textContent=r(p),c(`storage`).textContent=`${m.toFixed(2)} GB`};i.addEventListener(`input`,l),l()}</script>
+<aside aria-label="Note" class="starlight-aside starlight-aside--note"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 11a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0v-4a1 1 0 0 0-1-1Zm.38-3.92a1 1 0 0 0-.76 0 1 1 0 0 0-.33.21 1.15 1.15 0 0 0-.21.33 1 1 0 0 0 .21 1.09c.097.088.209.16.33.21A1 1 0 0 0 13 8a1.05 1.05 0 0 0-.29-.71 1 1 0 0 0-.33-.21ZM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16.001A8 8 0 0 1 12 20Z"/></svg>Note</p><div class="starlight-aside__content"><p>Prices are from <a href="https://fly.io/pricing/">Fly.io</a> and <a href="https://www.tigrisdata.com/pricing/">Tigris</a> as of October
+2026. Fly.io has so far waived invoices below 5 USD for the personal organization of an account. This is
+<a href="https://community.fly.io/t/does-fly-io-still-waive-5-invoices/25651">an informal policy</a>, not a guarantee, and it
+doesn’t apply to other organizations.</p></div></aside>
+<div class="sl-heading-wrapper level-h2"><h2 id="flyio">Fly.io</h2><a class="sl-anchor-link" href="#flyio"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fly.io”</span></a></div>
+<p>A <code dir="auto">shared-cpu-1x</code> machine with 256 MB costs about <strong>2 USD a month</strong> running 24/7, depending on the region. With
+auto-stop (the default in <code dir="auto">fly.example.toml</code>) you pay only while it runs.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="tigris">Tigris</h2><a class="sl-anchor-link" href="#tigris"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Tigris”</span></a></div>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Price</th>
+<th>Free each month</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Storage</td>
+<td>0.02 USD per GB-month</td>
+<td>5 GB</td>
+</tr>
+<tr>
+<td>Class A requests (PUT, COPY, POST, LIST)</td>
+<td>0.005 USD per 1,000</td>
+<td>10,000</td>
+</tr>
+<tr>
+<td>Class B requests (GET, HEAD and others)</td>
+<td>0.0005 USD per 1,000</td>
+<td>100,000</td>
+</tr>
+<tr>
+<td>DELETE requests, egress</td>
+<td>free</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Class A requests are the number to watch.</strong> For a machine running all month at the default settings:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Class A per month</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S3 mount monitor, write check (one PUT every 30 s)</td>
+<td>86,400</td>
+</tr>
+<tr>
+<td>S3 mount monitor, listing (when GeeseFS’s cache can’t answer)</td>
+<td>up to 86,400</td>
+</tr>
+<tr>
+<td>Litestream sync (one PUT per interval, only after writes)</td>
+<td>typically &lt; 10,000</td>
+</tr>
+<tr>
+<td>Litestream retention checks and daily snapshot</td>
+<td>~2,000</td>
+</tr>
+</tbody>
+</table>
+<p>To cut the monitor’s share, set <code dir="auto">GEESEFS_MONITOR_WRITE_CHECK=false</code> or raise <code dir="auto">GEESEFS_MONITOR_INTERVAL</code>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="litestream-sync-interval">Litestream sync interval</h2><a class="sl-anchor-link" href="#litestream-sync-interval"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Litestream sync interval”</span></a></div>
+<p>This image syncs every <strong>10 seconds</strong>, where Litestream’s default is 1 second. An interval without writes costs
+nothing, so the setting only caps the worst case, a database that changes all the time:</p>
+<table>
+<thead>
+<tr>
+<th><code dir="auto">LITESTREAM_SYNC_INTERVAL</code></th>
+<th>Max PUTs per month</th>
+<th>Max cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code dir="auto">1s</code> (Litestream default)</td>
+<td>2,592,000</td>
+<td>~13 USD</td>
+</tr>
+<tr>
+<td><code dir="auto">10s</code> (this image)</td>
+<td>259,200</td>
+<td>~1.30 USD</td>
+</tr>
+<tr>
+<td><code dir="auto">60s</code></td>
+<td>43,200</td>
+<td>~0.22 USD</td>
+</tr>
+</tbody>
+</table>
+<p>The price of a longer interval: if the machine dies without shutting down cleanly, the changes since the last sync
+are lost. A normal stop uploads them first.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="typical-totals">Typical totals</h2><a class="sl-anchor-link" href="#typical-totals"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Typical totals”</span></a></div>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Class A per month</th>
+<th>Tigris cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Always on, defaults</td>
+<td>~90,000 to ~185,000</td>
+<td>~0.40 to ~0.90 USD</td>
+</tr>
+<tr>
+<td>Always on, write check off</td>
+<td>~2,000 to ~100,000</td>
+<td>0 to ~0.45 USD</td>
+</tr>
+<tr>
+<td>Auto-stopped, ~2 hours a day</td>
+<td>~8,000 to ~15,000</td>
+<td>0 to ~0.03 USD</td>
+</tr>
+</tbody>
+</table>
+<p><a href="../../guides/backups/">Scheduled backups</a> add a few thousand requests a month. Their storage grows with every
+archive you keep, so set a lifecycle rule on the destination bucket.</p></div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"><a href="https://github.com/NiklasRosenstein/vaultwarden-fly-io/edit/main/docs/src/content/docs/reference/costs.mdx" class="sl-flex print:hidden astro-qlekgd3o"><svg aria-hidden="true" class="astro-qlekgd3o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.2em;"><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a><p>Last updated: <time datetime="2026-10-10T22:45:11.000Z">Oct 10, 2026</time></p></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/vaultwarden-fly-io/reference/architecture/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Architecture</span></span></a><a href="/vaultwarden-fly-io/development/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Development</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
