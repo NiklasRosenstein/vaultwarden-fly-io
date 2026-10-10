@@ -1,5 +1,7 @@
 """Optional, supervised SQLite/file backups; S3 completion records own the schedule."""
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import json
@@ -13,13 +15,20 @@ import tarfile
 import tempfile
 import time
 import uuid
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
+from typing import TYPE_CHECKING, Final, Literal, TypedDict, cast
 from urllib.request import urlopen
 
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+    from mypy_boto3_s3.type_defs import ObjectTypeDef
+
 LOG = logging.getLogger("backup")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION: Final = 1
 DATA_DIR = Path("/data")
 # Only image inputs needed for recovery belong in the encrypted environment export.
 RECOVERY_FIELDS = """
@@ -60,13 +69,45 @@ RECOVERY_EXCLUSIONS = {
 }
 
 
+class CaptureRecordV1(TypedDict):
+    schema_version: Literal[1]
+    backup_id: str
+    captured_at: str
+    database_capture_finished_at: str
+    vaultwarden_version: str
+    status: Literal["complete", "degraded"]
+    missing_file_count: int
+
+
+class CompletionManifestV1(CaptureRecordV1):
+    completed_at: str
+    archive_key: str
+    archive_size: int
+    archive_sha256: str
+
+
+class MissingFile(TypedDict):
+    path: str
+    expected_size: int
+
+
+class FileDetails(TypedDict):
+    size: int
+    sha256: str
+
+
+class PayloadManifestV1(CaptureRecordV1):
+    files: dict[str, FileDetails]
+    missing_files: list[MissingFile]
+
+
 class BackupError(ValueError):
     """A diagnostic written by this module that is safe to include in logs."""
 
 
-def positive_int(name, default):
+def positive_int(name: str, default: int) -> int:
     try:
-        value = int(os.environ.get(name, default))
+        value = int(os.environ.get(name, str(default)))
     except ValueError:
         raise BackupError(f"{name} must be a positive integer") from None
     if value <= 0:
@@ -74,48 +115,99 @@ def positive_int(name, default):
     return value
 
 
-def required(name):
+def required(name: str) -> str:
     value = os.environ.get(name)
     if not value:
         raise BackupError(f"{name} is required")
     return value
 
 
-def utc(timestamp):
-    return (
-        datetime.fromtimestamp(timestamp, timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+def utc(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, UTC).isoformat().replace("+00:00", "Z")
 
 
-def parse_utc(value):
+def parse_utc(value: str) -> float:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.utcoffset() is None:
         raise BackupError("timestamp needs a timezone")
     return parsed.timestamp()
 
 
-def digest(path):
+def digest(path: Path) -> bytes:
     h = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(chunk)
-    return h
+    return h.digest()
 
 
-def write_json(path, value):
+def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def json_object(raw: str | bytes) -> dict[str, object]:
+    value: object = json.loads(raw)
+    if not isinstance(value, dict):
+        raise BackupError("expected JSON object")
+    # JSON object keys are strings; values remain unknown until individually checked.
+    return cast(dict[str, object], value)
+
+
+def json_string(value: object) -> str:
+    if not isinstance(value, str):
+        raise BackupError("expected JSON string")
+    return value
+
+
+def json_integer(value: object) -> int:
+    if type(value) is not int:
+        raise BackupError("expected JSON integer")
+    return value
+
+
+def decode_completion(raw: bytes) -> CompletionManifestV1:
+    """Validate the version 1 wire format before exposing typed scheduling metadata."""
+    value = json_object(raw)
+    if json_integer(value["schema_version"]) != SCHEMA_VERSION:
+        raise BackupError("unsupported completion manifest version")
+    status = value["status"]
+    if status not in ("complete", "degraded"):
+        raise BackupError("invalid completion status")
+    count = json_integer(value["missing_file_count"])
+    size = json_integer(value["archive_size"])
+    checksum = json_string(value["archive_sha256"])
+    if count < 0 or (status == "complete") != (count == 0) or size <= 0:
+        raise BackupError("invalid completion counts")
+    if len(checksum) != 64 or any(char not in "0123456789abcdef" for char in checksum):
+        raise BackupError("invalid archive checksum")
+    captured = json_string(value["captured_at"])
+    finished = json_string(value["database_capture_finished_at"])
+    completed = json_string(value["completed_at"])
+    for timestamp in (captured, finished, completed):
+        parse_utc(timestamp)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "backup_id": json_string(value["backup_id"]),
+        "captured_at": captured,
+        "database_capture_finished_at": finished,
+        "completed_at": completed,
+        "vaultwarden_version": json_string(value["vaultwarden_version"]),
+        "status": "complete" if status == "complete" else "degraded",
+        "missing_file_count": count,
+        "archive_key": json_string(value["archive_key"]),
+        "archive_size": size,
+        "archive_sha256": checksum,
+    }
+
+
 class Store:
-    def __init__(self, client, bucket, prefix):
+    def __init__(self, client: S3Client, bucket: str, prefix: str) -> None:
         self.client, self.bucket, self.prefix = client, bucket, prefix.strip("/")
 
-    def key(self, suffix):
+    def key(self, suffix: str) -> str:
         return f"{self.prefix}/{suffix}" if self.prefix else suffix
 
-    def objects(self, suffix):
+    def objects(self, suffix: str) -> Iterator[ObjectTypeDef]:
         for page in self.client.get_paginator("list_objects_v2").paginate(
             Bucket=self.bucket, Prefix=self.key(suffix)
         ):
@@ -124,14 +216,14 @@ class Store:
 
 def s3_store(
     *,
-    bucket,
-    prefix,
-    access_key,
-    secret_key,
-    region,
-    session_token=None,
-    endpoint_url=None,
-):
+    bucket: str,
+    prefix: str,
+    access_key: str,
+    secret_key: str,
+    region: str,
+    session_token: str | None = None,
+    endpoint_url: str | None = None,
+) -> Store:
     import boto3
     from botocore.config import Config
 
@@ -145,7 +237,8 @@ def s3_store(
         config=Config(
             connect_timeout=10,
             read_timeout=30,
-            ignore_configured_endpoint_urls=True,
+            # botocore-stubs omits this supported option; the endpoint-isolation test covers it.
+            ignore_configured_endpoint_urls=True,  # type: ignore[call-arg]
             retries={"mode": "standard", "total_max_attempts": 3},
             s3={"addressing_style": "path"},
         ),
@@ -153,7 +246,7 @@ def s3_store(
     return Store(client, bucket, prefix)
 
 
-def read_completion(store, key, now):
+def read_completion(store: Store, key: str, now: float) -> float:
     from botocore.exceptions import ClientError
 
     response = store.client.get_object(Bucket=store.bucket, Key=key)
@@ -161,21 +254,12 @@ def read_completion(store, key, now):
         raw = body.read(65537)
     if len(raw) > 65536:
         raise BackupError("completion manifest too large")
-    record = json.loads(raw)
+    record = decode_completion(raw)
     captured = parse_utc(record["captured_at"])
-    if record["schema_version"] != SCHEMA_VERSION or not 0 <= captured <= now:
-        raise BackupError("invalid completion manifest")
+    if not 0 <= captured <= now:
+        raise BackupError("invalid completion timestamp")
     if not record["archive_key"].startswith(store.key("archives/")):
         raise BackupError("archive outside backup prefix")
-    checksum = record["archive_sha256"]
-    if (
-        type(record["archive_size"]) is not int
-        or record["archive_size"] <= 0
-        or not isinstance(checksum, str)
-        or len(checksum) != 64
-        or any(char not in "0123456789abcdef" for char in checksum)
-    ):
-        raise BackupError("invalid archive metadata")
     try:
         head = store.client.head_object(Bucket=store.bucket, Key=record["archive_key"])
     except ClientError as error:
@@ -199,7 +283,7 @@ def read_completion(store, key, now):
     return captured
 
 
-def latest_capture(store, now):
+def latest_capture(store: Store, now: float) -> float | None:
     from botocore.exceptions import ClientError
 
     records = sorted(
@@ -224,7 +308,7 @@ def latest_capture(store, now):
     return None
 
 
-def snapshot_database(source, destination):
+def snapshot_database(source: Path, destination: Path) -> None:
     # mode=ro refuses to create an empty database if startup/restore has not finished.
     with closing(
         sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
@@ -235,14 +319,16 @@ def snapshot_database(source, destination):
                 raise BackupError("SQLite integrity check failed")
 
 
-def safe_path(root, name):
+def safe_path(root: Path, name: str) -> Path:
     parts = name.split("/")
     if any(part in ("", ".", "..") for part in parts) or "\\" in name:
         raise BackupError("unsafe object path")
     return root.joinpath(*parts)
 
 
-def capture_files(store, destination, remaining_bytes, *, prefixes):
+def capture_files(
+    store: Store, destination: Path, remaining_bytes: int, *, prefixes: Sequence[str]
+) -> None:
     for prefix in prefixes:
         for obj in store.objects(prefix):
             key = obj["Key"]
@@ -271,8 +357,10 @@ def capture_files(store, destination, remaining_bytes, *, prefixes):
             remaining_bytes -= size
 
 
-def validate_files(expected, files):
-    missing = []
+def validate_files(
+    expected: Iterable[tuple[str, int]], files: Path
+) -> list[MissingFile]:
+    missing: list[MissingFile] = []
     for name, size in expected:
         try:
             actual = safe_path(files, name).stat().st_size
@@ -284,7 +372,9 @@ def validate_files(expected, files):
     return missing
 
 
-def encrypt_archive(payload, target, recipient, *, arcname):
+def encrypt_archive(
+    payload: Path, target: Path, recipient: str, *, arcname: str
+) -> None:
     with target.open("xb") as output:
         with subprocess.Popen(
             ["age", "-r", recipient],
@@ -292,6 +382,7 @@ def encrypt_archive(payload, target, recipient, *, arcname):
             stdout=output,
             stderr=subprocess.DEVNULL,
         ) as age:
+            assert age.stdin is not None
             try:
                 with tarfile.open(fileobj=age.stdin, mode="w|gz") as archive:
                     archive.add(payload, arcname=arcname)
@@ -301,7 +392,7 @@ def encrypt_archive(payload, target, recipient, *, arcname):
                 raise BackupError("archive encryption failed")
 
 
-def publish(store, archive, record):
+def publish(store: Store, archive: Path, record: CaptureRecordV1) -> None:
     checksum = digest(archive)
     archive_key = store.key(f"archives/{record['backup_id']}.tar.age")
     # Single PUT caps the archive at <5 GiB and lets S3 verify the full SHA-256 checksum.
@@ -314,22 +405,22 @@ def publish(store, archive, record):
             ContentLength=archive.stat().st_size,
             ContentType="application/octet-stream",
             ChecksumAlgorithm="SHA256",
-            ChecksumSHA256=base64.b64encode(checksum.digest()).decode(),
-            Metadata={"sha256": checksum.hexdigest()},
+            ChecksumSHA256=base64.b64encode(checksum).decode(),
+            Metadata={"sha256": checksum.hex()},
         )
     head = store.client.head_object(Bucket=store.bucket, Key=archive_key)
     if (
         head["ContentLength"] != archive.stat().st_size
-        or head.get("Metadata", {}).get("sha256") != checksum.hexdigest()
+        or head.get("Metadata", {}).get("sha256") != checksum.hex()
     ):
         raise BackupError("uploaded archive verification failed")
-    completion = dict(
-        record,
-        completed_at=utc(time.time()),
-        archive_key=archive_key,
-        archive_size=archive.stat().st_size,
-        archive_sha256=checksum.hexdigest(),
-    )
+    completion: CompletionManifestV1 = {
+        **record,
+        "completed_at": utc(time.time()),
+        "archive_key": archive_key,
+        "archive_size": archive.stat().st_size,
+        "archive_sha256": checksum.hex(),
+    }
     manifest = json.dumps(completion).encode()
     store.client.put_object(
         Bucket=store.bucket,
@@ -342,7 +433,7 @@ def publish(store, archive, record):
     )
 
 
-def main(work):
+def main(work: Path) -> float:
     """Capture the Vaultwarden recovery payload and return the next scheduled time."""
     destination = s3_store(
         bucket=required("BACKUP_BUCKET_NAME"),
@@ -372,7 +463,7 @@ def main(work):
     recipient = required("BACKUP_AGE_RECIPIENT")
     captured = parse_utc(utc(time.time()))
     backup_id = (
-        datetime.fromtimestamp(captured, timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        datetime.fromtimestamp(captured, UTC).strftime("%Y%m%dT%H%M%S.%fZ")
         + "-"
         + uuid.uuid4().hex
     )
@@ -394,15 +485,18 @@ def main(work):
         }
         if not {"users", "ciphers", "attachments", "sends"} <= tables:
             raise BackupError("not an initialized Vaultwarden database")
-        expected = [
+        expected: list[tuple[str, int]] = [
             (f"attachments/{cipher}/{ident}", size)
             for ident, cipher, size in db.execute(
                 "SELECT id, cipher_uuid, file_size FROM attachments"
             )
         ]
         for ident, data in db.execute("SELECT uuid, data FROM sends WHERE atype=1"):
-            data = {key.lower(): value for key, value in json.loads(data).items()}
-            expected.append((f"sends/{ident}/{data['id']}", int(data["size"])))
+            send = {key.lower(): value for key, value in json_object(data).items()}
+            size = send["size"]
+            if not isinstance(size, (str, int)):
+                raise BackupError("invalid Send file size")
+            expected.append((f"sends/{ident}/{json_string(send['id'])}", int(size)))
     LOG.info("capturing files")
     files = payload / "files"
     files.mkdir()
@@ -424,11 +518,11 @@ def main(work):
     missing = validate_files(expected, files)
     recovery = payload / "recovery"
     recovery.mkdir()
-    config = json.loads((DATA_DIR / "config.json").read_text())
+    config = json_object((DATA_DIR / "config.json").read_text())
     environment = {
         name: os.environ[name] for name in RECOVERY_FIELDS if name in os.environ
     }
-    environment["VAULTWARDEN_DOMAIN"] = config["domain"]
+    environment["VAULTWARDEN_DOMAIN"] = json_string(config["domain"])
     environment["VAULTWARDEN_RSA_PRIVATE_KEY"] = (DATA_DIR / "rsa_key.pem").read_text()
     write_json(recovery / "environment.json", environment)
     write_json(recovery / "config.json", config)
@@ -439,7 +533,7 @@ def main(work):
         .decode()
         .strip()
     )
-    record = {
+    record: CaptureRecordV1 = {
         "schema_version": SCHEMA_VERSION,
         "backup_id": backup_id,
         "captured_at": utc(captured),
@@ -448,19 +542,18 @@ def main(work):
         "status": "degraded" if missing else "complete",
         "missing_file_count": len(missing),
     }
-    entries = {
+    entries: dict[str, FileDetails] = {
         str(path.relative_to(payload)): {
             "size": path.stat().st_size,
-            "sha256": digest(path).hexdigest(),
+            "sha256": digest(path).hex(),
         }
         for path in payload.rglob("*")
         if path.is_file()
     }
     if sum(entry["size"] for entry in entries.values()) > maximum:
         raise BackupError("backup exceeds BACKUP_MAX_BYTES")
-    write_json(
-        payload / "manifest.json", dict(record, files=entries, missing_files=missing)
-    )
+    manifest: PayloadManifestV1 = {**record, "files": entries, "missing_files": missing}
+    write_json(payload / "manifest.json", manifest)
     archive = work / "backup.tar.age"
     LOG.info("encrypting archive")
     encrypt_archive(payload, archive, recipient, arcname="vaultwarden")
@@ -477,14 +570,14 @@ def main(work):
     return captured + interval
 
 
-def signal_group(process, signum):
+def signal_group(process: subprocess.Popen[bytes], signum: int) -> None:
     try:
         os.killpg(process.pid, signum)
     except ProcessLookupError:
         pass
 
 
-def stop_capture(process):
+def stop_capture(process: subprocess.Popen[bytes]) -> bool:
     # Captures have no persistent local state; terminate age and any other children too.
     try:
         signal_group(process, signal.SIGKILL)
@@ -497,7 +590,7 @@ def stop_capture(process):
         return False
 
 
-def cleanup_staging(staging):
+def cleanup_staging(staging: tempfile.TemporaryDirectory[str]) -> bool:
     try:
         staging.cleanup()
         return True
@@ -506,23 +599,24 @@ def cleanup_staging(staging):
         return False
 
 
-def supervise(command):
+def supervise(command: Sequence[str]) -> int:
     stopping = False
 
-    def stop(_signum, _frame):
+    def stop(_signum: int, _frame: FrameType | None) -> None:
         nonlocal stopping
         stopping = True
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     app = subprocess.Popen(command, start_new_session=True)
-    capture = None
-    staging = None
-    due, deadline, failures = 0, 0, 0
+    capture: subprocess.Popen[bytes] | None = None
+    staging: tempfile.TemporaryDirectory[str] | None = None
+    due, deadline, failures = 0.0, 0.0, 0
     try:
         while not stopping and app.poll() is None:
             now = time.monotonic()
             if capture is not None:
+                assert staging is not None
                 timed_out = now >= deadline
                 if timed_out and not stop_capture(capture):
                     deadline = float("inf")
@@ -530,10 +624,13 @@ def supervise(command):
                     success = capture.returncode == 0 and not timed_out
                     if success:
                         try:
-                            schedule = json.loads(
+                            schedule = json_object(
                                 (Path(staging.name) / "schedule.json").read_text()
                             )
-                            due = now + max(1, schedule["next_due"] - time.time())
+                            next_due = schedule["next_due"]
+                            if not isinstance(next_due, (int, float)):
+                                raise BackupError("invalid scheduled time")
+                            due = now + max(1, next_due - time.time())
                             failures = 0
                         except (OSError, ValueError, KeyError, TypeError):
                             success = False
@@ -584,10 +681,11 @@ def supervise(command):
                 signal_group(app, signal.SIGKILL)
                 app.wait(timeout=10)
         signal_group(app, signal.SIGKILL)
+    assert app.returncode is not None
     return app.returncode if app.returncode >= 0 else 128 - app.returncode
 
 
-def cli():
+def cli() -> int:
     """Dispatch supervisor/worker modes and report failures without exposing secrets."""
     logging.basicConfig(
         level=logging.INFO,

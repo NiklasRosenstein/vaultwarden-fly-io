@@ -235,3 +235,20 @@ Recovery fields are explicitly listed in `vaultwarden-fly-io/backup.py`. Every e
 this README must be captured or have a named exclusion with a reason; CI checks this contract. Backup-destination
 options and one-time maintenance flags are excluded. The worker does not export unrelated environment variables
 or access a secrets manager.
+
+
+### Development checks
+
+Install Python 3.12 or newer and `age`, then run from the repository root:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/python -m mypy
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+CI requires lint, formatting, strict type checks, and tests before building the image.
+Use `.venv/bin/ruff format .` to apply formatting. SDK stubs and checking tools are development dependencies only.

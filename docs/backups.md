@@ -43,6 +43,10 @@ using `captured_at`, not upload time, and verify that the referenced archive exi
 backup is degraded: a recent archive protects the database but does not guarantee every attachment is recoverable.
 No monitor or retention controller is bundled in the image; configure external alerts and periodic restore tests.
 
+`CompletionManifestV1` in `backup.py` defines the version 1 completion schema. The decoder validates required
+fields, timestamps, status/count consistency, and checksum format before returning typed metadata. Unsupported
+schema versions are rejected; changes to the wire contract require a new version and an explicit decoder.
+
 Scheduling skips malformed completion records, future capture timestamps, and records with missing or mismatched
 archives, logging a warning without deleting anything. It uses the next valid record, or captures immediately if
 none is valid. Authentication, network, and service errors fail the scheduling check and retry with backoff.

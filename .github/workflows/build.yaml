@@ -13,10 +13,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y age python3-boto3
+      - name: Install development dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age python3-venv
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r requirements-dev.txt
+      - name: Lint Python
+        run: .venv/bin/ruff check .
+      - name: Check Python formatting
+        run: .venv/bin/ruff format --check .
+      - name: Type check Python
+        run: .venv/bin/python -m mypy
       - name: Test scheduled backups
-        run: /usr/bin/python3 -m unittest discover -s tests -v
+        run: .venv/bin/python -m unittest discover -s tests -v
 
   docker:
     needs: test
