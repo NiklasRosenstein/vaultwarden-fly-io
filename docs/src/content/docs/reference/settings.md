@@ -148,7 +148,7 @@ See [Turn on backups](../../keep-your-data-safe/turn-on-backups/).
 | `BACKUP_AWS_SECRET_ACCESS_KEY` | required without a role | Secret key for the backup bucket. |
 | `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for short-lived keys. You must renew it yourself. |
 | `BACKUP_AWS_ROLE_ARN` | unset | IAM role to use instead of keys, see [AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/). Can't be used together with keys. |
-| `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Fly.io machine API | File with the token for the role. Leave unset on Fly.io. Required elsewhere. |
+| `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Fly.io machine API | File with the token for the role. Required outside Fly.io. On Fly.io, leave it unset: the app gets tokens from the machine's local Fly.io API. |
 | `BACKUP_AWS_ROLE_SESSION_NAME` | `vaultwarden-backup` | Name shown in CloudTrail. |
 | `BACKUP_AWS_REGION` | required when on | Region of the backup bucket. |
 | `BACKUP_AWS_ENDPOINT_URL_S3` | AWS endpoint of the region | S3 address for other providers. The provider must support conditional uploads and SHA-256 checksums. |

@@ -68,6 +68,10 @@ The **backup role** needs only the [backup permissions](../../keep-your-data-saf
 | `AWS_WEB_IDENTITY_TOKEN_FILE` | `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Leave unset on Fly.io. Elsewhere, the path to the token. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` | `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_ENDPOINT_URL_S3` | Unset. |
 
+On Fly.io you don't need token files. For the app bucket, Fly.io writes the token to a file and sets
+`AWS_WEB_IDENTITY_TOKEN_FILE` for you. For the backup bucket, the app asks the machine's local Fly.io API for a fresh
+token each time it needs one.
+
 On Fly.io, set the roles, regions and `BUCKET_NAME` in `fly.toml`, then remove the secrets that `fly storage create` added. Secrets win over
 `[env]`, so they would break the setup:
 
