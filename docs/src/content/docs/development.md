@@ -7,7 +7,7 @@ description: Run the checks, work on the docs, and how releases are made.
 
 | Path | Contents |
 | --- | --- |
-| `vaultwarden-fly-io/` | Container image: `Dockerfile`, the entrypoint `entrypoint.py` and the backup worker `backup.py`. |
+| `vaultwarden-fly-io/` | Container image: `Dockerfile`, the entrypoint `entrypoint.py`, the backup worker `backup.py` and the environment parsing they share, `settings.py`. |
 | `tests/` | Unit tests for the entrypoint and the backup worker. |
 | `fly.example.toml` | Starting point for a deployment. |
 | `docs/` | This documentation site ([Astro Starlight](https://starlight.astro.build/)). |

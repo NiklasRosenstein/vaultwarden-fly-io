@@ -21,6 +21,8 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING
 
+from settings import ConfigError, env, flag, integer, positive_int, required
+
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
@@ -39,40 +41,8 @@ RESTART_GRACE_SECONDS = 60
 TOKEN_FILE_TIMEOUT_SECONDS = 30
 
 
-class StartupError(Exception):
-    """A configuration or startup problem with a message that is safe to log."""
-
-
-def env(name: str, default: str = "") -> str:
-    # Like the shell's ${NAME:-default}: an empty value counts as unset.
-    return os.environ.get(name) or default
-
-
-def required(name: str) -> str:
-    value = env(name)
-    if not value:
-        raise StartupError(f'missing expected environment variable "{name}"')
-    return value
-
-
-def flag(name: str, default: bool) -> bool:
-    value = env(name, "true" if default else "false")
-    if value not in ("true", "false"):
-        raise StartupError(f'{name} must be "true" or "false", got "{value}"')
-    return value == "true"
-
-
-def integer(name: str, default: int, *, minimum: int = 0) -> int:
-    value = env(name, str(default))
-    if not value.isdigit() or int(value) < minimum:
-        raise StartupError(
-            f'{name} must be an integer of at least {minimum}, got "{value}"'
-        )
-    return int(value)
-
-
-def positive_int(name: str, default: int) -> int:
-    return integer(name, default, minimum=1)
+# A configuration or startup problem with a message that is safe to log.
+StartupError = ConfigError
 
 
 def run(command: Sequence[str]) -> None:
@@ -180,7 +150,8 @@ def vaultwarden_config() -> dict[str, object]:
         "password_iterations": positive_int("VAULTWARDEN_PASSWORD_ITERATIONS", 600000),
         "password_hints_allowed": flag("VAULTWARDEN_PASSWORD_HINTS_ALLOWED", True),
         "show_password_hint": flag("VAULTWARDEN_SHOW_PASSWORD_HINT", False),
-        "admin_token": required("VAULTWARDEN_ADMIN_TOKEN"),
+        # An empty token disables the admin page.
+        "admin_token": required("VAULTWARDEN_ADMIN_TOKEN", allow_empty=True),
         "invitation_org_name": env("VAULTWARDEN_INVITATION_ORG_NAME", "Vaultwarden"),
         "ip_header": env("VAULTWARDEN_IP_HEADER", "X-Real-IP"),
         "icon_redirect_code": 302,
@@ -205,8 +176,9 @@ def vaultwarden_config() -> dict[str, object]:
             "smtp_port": positive_int("VAULTWARDEN_SMTP_PORT", 465),
             "smtp_from": required("VAULTWARDEN_SMTP_FROM"),
             "smtp_from_name": env("VAULTWARDEN_SMTP_FROM_NAME", "Vaultwarden"),
-            "smtp_username": required("VAULTWARDEN_SMTP_USERNAME"),
-            "smtp_password": required("VAULTWARDEN_SMTP_PASSWORD"),
+            # Empty for relays that don't require authentication.
+            "smtp_username": required("VAULTWARDEN_SMTP_USERNAME", allow_empty=True),
+            "smtp_password": required("VAULTWARDEN_SMTP_PASSWORD", allow_empty=True),
             "smtp_timeout": 15,
             "smtp_embed_images": True,
             "smtp_accept_invalid_certs": False,
@@ -341,7 +313,11 @@ def prepare_database() -> list[str]:
             + ["-if-db-not-exists", "-if-replica-exists", "-replica", "s3", database]
         )
     if not litestream:
-        LOG.warning("Litestream is disabled, the database is not persisted.")
+        # Images before the Python entrypoint ignored LITESTREAM_ENABLED=false.
+        LOG.warning(
+            "LITESTREAM_ENABLED=false: the database is neither restored nor "
+            "replicated, and all changes are lost when the machine restarts"
+        )
         return [VAULTWARDEN]
     return [
         "litestream",
@@ -420,9 +396,21 @@ class S3Monitor:
         self.probe = (
             S3_MOUNT / f".s3-monitor-{env('FLY_MACHINE_ID') or os.uname().nodename}"
         )
+        self.bucket = required("BUCKET_NAME")
+        # Created once: credentials, including web identity ones, are reused between
+        # checks. A configuration problem stops startup instead of breaking the check.
+        self.client = s3_client()
         self.run_with_deadline = Deadline()
         self.stopped = threading.Event()
         self.failed = False
+
+    def check(self) -> Health:
+        try:
+            return self.check_mount()
+        except Exception as error:
+            # For example, too many processes stuck on the mount to start another one.
+            LOG.warning("s3-monitor: check failed with %s", type(error).__name__)
+            return Health.DEGRADED
 
     def check_mount(self) -> Health:
         if "geesefs" not in process_names():
@@ -461,14 +449,37 @@ class S3Monitor:
         return Health.OK
 
     def check_bucket(self) -> bool:
-        """Whether the bucket can be reached directly, without going through GeeseFS."""
+        """Whether S3 answers requests for the bucket directly, without GeeseFS.
+
+        Any answer from S3 counts, even an error such as AccessDenied, except for server
+        errors during an outage. Credential failures (for example an expired web
+        identity token) don't count: Litestream uses the same credentials, so it could
+        not upload its pending changes before a restart either.
+        """
+        from botocore.exceptions import ClientError
+
         result: list[bool] = []
 
         def attempt() -> None:
             try:
-                s3_client().list_objects_v2(Bucket=required("BUCKET_NAME"), MaxKeys=1)
+                self.client.list_objects_v2(Bucket=self.bucket, MaxKeys=1)
                 result.append(True)
-            except Exception:
+            except ClientError as error:
+                status = error.response.get("ResponseMetadata", {}).get(
+                    "HTTPStatusCode", 0
+                )
+                answered = error.operation_name == "ListObjectsV2" and status < 500
+                if not answered:
+                    LOG.warning(
+                        "s3-monitor: bucket check failed: %s returned %s",
+                        error.operation_name,
+                        error.response.get("Error", {}).get("Code"),
+                    )
+                result.append(answered)
+            except Exception as error:
+                LOG.warning(
+                    "s3-monitor: bucket check failed with %s", type(error).__name__
+                )
                 result.append(False)
 
         # Requests time out on their own; the thread only bounds the total time.
@@ -487,7 +498,7 @@ class S3Monitor:
         )
         failures = 0
         while not self.stopped.wait(self.interval) and main.poll() is None:
-            health = self.check_mount()
+            health = self.check()
             if health == Health.OK:
                 if failures:
                     LOG.info(
@@ -535,16 +546,24 @@ class S3Monitor:
 
 def supervise(command: Sequence[str], monitor: S3Monitor | None) -> int:
     """Run the application, forward termination signals and supervise /mnt/s3."""
-    LOG.info("$ %s", " ".join(command))
-    main = subprocess.Popen(command)
+    main: subprocess.Popen[bytes] | None = None
+    stopping = False
 
     def stop(_signum: int, _frame: FrameType | None) -> None:
+        nonlocal stopping
+        stopping = True
         if monitor is not None:
             monitor.stop()
-        main.terminate()
+        if main is not None:
+            main.terminate()
 
+    # Installed first, so that a stop signal can't arrive before it can be forwarded.
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    LOG.info("$ %s", " ".join(command))
+    main = subprocess.Popen(command)
+    if stopping:
+        main.terminate()
     if monitor is not None:
         threading.Thread(target=monitor.run, args=(main,), daemon=True).start()
     status = main.wait()
@@ -577,7 +596,8 @@ def cli() -> int:
     logging.basicConfig(
         level=logging.INFO, format="[entrypoint | %(levelname)5s]: %(message)s"
     )
-    logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
+    # Its refresh warnings include SDK error messages, which can contain account data.
+    logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
     try:
         return main()
     except Exception as error:

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 MODULE = Path(__file__).resolve().parents[1] / "vaultwarden-fly-io" / "entrypoint.py"
 if TYPE_CHECKING:
@@ -113,9 +113,24 @@ class ConfigTests(EntrypointTestCase):
                 with self.assertRaisesRegex(entrypoint.StartupError, name):
                     entrypoint.vaultwarden_config()
 
+    def test_empty_admin_token_disables_admin_page(self) -> None:
+        os.environ.update(
+            VAULTWARDEN_ADMIN_TOKEN="",
+            VAULTWARDEN_ENABLE_SMTP="true",
+            VAULTWARDEN_SMTP_HOST="smtp.example.com",
+            VAULTWARDEN_SMTP_FROM="vault@example.com",
+            VAULTWARDEN_SMTP_USERNAME="",
+            VAULTWARDEN_SMTP_PASSWORD="",
+        )
+        config = entrypoint.vaultwarden_config()
+        self.assertEqual(config["admin_token"], "")
+        self.assertEqual(config["smtp_username"], "")
+        del os.environ["VAULTWARDEN_ADMIN_TOKEN"]
+        with self.assertRaisesRegex(entrypoint.StartupError, "VAULTWARDEN_ADMIN_TOKEN"):
+            entrypoint.vaultwarden_config()
+
     def test_required_values(self) -> None:
         cases: dict[str, dict[str, str]] = {
-            "VAULTWARDEN_ADMIN_TOKEN": {"VAULTWARDEN_ADMIN_TOKEN": ""},
             "FLY_APP_NAME": {"FLY_APP_NAME": ""},
             "VAULTWARDEN_SMTP_HOST": {"VAULTWARDEN_ENABLE_SMTP": "true"},
             "VAULTWARDEN_PUSH_INSTALLATION_KEY": {
@@ -386,6 +401,47 @@ class MonitorTests(EntrypointTestCase):
         self.assertFalse(monitor.failed)
         self.assertIsNone(self.main.poll())
 
+    def test_check_errors_count_as_failed_checks(self) -> None:
+        monitor = entrypoint.S3Monitor()
+        with patch.object(monitor, "check_mount", side_effect=OSError("EAGAIN")):
+            self.assertEqual(monitor.check(), entrypoint.Health.DEGRADED)
+
+    def test_bucket_check_counts_any_answer_from_s3(self) -> None:
+        def client_error(operation: str, code: str, status: int) -> ClientError:
+            response: Any = {
+                "Error": {"Code": code, "Message": ""},
+                "ResponseMetadata": {"HTTPStatusCode": status},
+            }
+            return ClientError(response, operation)
+
+        cases: dict[str, tuple[object, bool]] = {
+            "success": ({}, True),
+            "access denied": (client_error("ListObjectsV2", "AccessDenied", 403), True),
+            "server error": (
+                client_error("ListObjectsV2", "ServiceUnavailable", 503),
+                False,
+            ),
+            "credentials": (
+                client_error("AssumeRoleWithWebIdentity", "InvalidIdentityToken", 400),
+                False,
+            ),
+            "network": (
+                EndpointConnectionError(endpoint_url="https://s3.example.com"),
+                False,
+            ),
+        }
+        monitor = entrypoint.S3Monitor()
+        for name, (outcome, reachable) in cases.items():
+            with self.subTest(name), patch.object(monitor, "client") as client:
+                if isinstance(outcome, Exception):
+                    client.list_objects_v2.side_effect = outcome
+                else:
+                    client.list_objects_v2.return_value = outcome
+                self.assertIs(monitor.check_bucket(), reachable)
+                client.list_objects_v2.assert_called_once_with(
+                    Bucket="bucket", MaxKeys=1
+                )
+
 
 class SuperviseTests(EntrypointTestCase):
     def supervise(self, script: str) -> subprocess.Popen[str]:
@@ -416,6 +472,21 @@ class SuperviseTests(EntrypointTestCase):
                 process.send_signal(signum)
                 self.assertEqual(process.wait(timeout=10), 7)
                 self.assertTrue(marker.exists())
+
+    def test_stop_signal_before_start_is_forwarded(self) -> None:
+        handlers = signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)
+        self.addCleanup(signal.signal, signal.SIGTERM, handlers[0])
+        self.addCleanup(signal.signal, signal.SIGINT, handlers[1])
+        popen = subprocess.Popen
+
+        def signal_while_starting(command: list[str]) -> subprocess.Popen[bytes]:
+            # The signal arrives before supervise() has a process to forward it to.
+            os.kill(os.getpid(), signal.SIGTERM)
+            return popen(command)
+
+        with patch.object(subprocess, "Popen", signal_while_starting):
+            status = entrypoint.supervise(["sleep", "60"], None)
+        self.assertEqual(status, 128 + signal.SIGTERM)
 
     def test_monitor_failure_exits_with_error(self) -> None:
         monitor = entrypoint.S3Monitor()

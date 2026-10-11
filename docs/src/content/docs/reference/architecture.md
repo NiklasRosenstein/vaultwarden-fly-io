@@ -59,8 +59,9 @@ After 60 seconds it sends `SIGKILL`, and the container exits with status `1`. Fl
 according to its restart policy (`on-failure` by default), which mounts the bucket again.
 
 :::note[S3 outages don't trigger restarts]
-Before restarting, the monitor checks with a direct S3 request that the bucket itself is reachable. If it isn't, for example during
-an outage of the S3 provider, the machine is **not** restarted. The disk doesn't survive a restart, so Litestream
+Before restarting, the monitor checks with a direct S3 request that the bucket itself is reachable. Any answer from S3
+counts, even an access error, but server errors and credential failures (for example an expired OIDC token) don't. If
+the bucket isn't reachable, for example during an outage of the S3 provider, the machine is **not** restarted. The disk doesn't survive a restart, so Litestream
 could neither upload its pending changes nor restore the database. Vaultwarden keeps serving from the local database,
 and the restart happens once S3 is reachable again, if the mount is still broken by then.
 :::

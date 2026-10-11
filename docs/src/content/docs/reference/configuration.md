@@ -38,7 +38,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `VAULTWARDEN_ADMIN_TOKEN` | required | Admin panel token. Hash it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Because it's hashed, it can be a plain environment variable. |
+| `VAULTWARDEN_ADMIN_TOKEN` | required | Admin panel token. Hash it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Because it's hashed, it can be a plain environment variable. Set it to an empty value to disable the admin panel. |
 | `VAULTWARDEN_RSA_PRIVATE_KEY` | required | 2048-bit RSA private key used to sign JWTs. Generate it with `openssl genrsa 2048`. Changing it invalidates all current sessions. |
 | `VAULTWARDEN_DOMAIN` | `https://${FLY_APP_NAME}.fly.dev` | Public URL of your deployment. |
 | `VAULTWARDEN_LOG_LEVEL` | `info` | Log verbosity. |
@@ -99,7 +99,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `AGE_SECRET_KEY` | required | age identity that encrypts the replica. Keep a copy outside Fly.io. |
-| `LITESTREAM_ENABLED` | `true` | Restore and replicate the database with Litestream. If you turn this off, the database is lost on every restart. |
+| `LITESTREAM_ENABLED` | `true` | Restore and replicate the database with Litestream. If you turn this off, the database is lost on every restart. Older images ignored this option and always used Litestream, so check that it is not set before upgrading. |
 | `LITESTREAM_SYNC_INTERVAL` | `10s` | How often changes are pushed to the replica. Litestream's own default is `1s`. This image uses `10s` to cap the number of S3 requests, see the [cost model](../costs/#litestream-sync-interval). Lower it to shrink the window of changes lost on a crash. |
 | `LITESTREAM_RETENTION` | `24h` | How long snapshots and WAL segments are kept. |
 | `LITESTREAM_RETENTION_CHECK_INTERVAL` | `1h` | How often retention is enforced. |

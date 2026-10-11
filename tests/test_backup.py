@@ -237,6 +237,10 @@ class BackupTests(unittest.TestCase):
         )
         self.env.start()
         self.addCleanup(self.env.stop)
+        # Tests must not depend on whether the host is a Fly.io machine.
+        fly_api = patch.object(backup, "FLY_API_SOCKET", self.root / "no-fly-api")
+        fly_api.start()
+        self.addCleanup(fly_api.stop)
 
     def run_capture(self) -> float:
         work = self.root / str(time.time_ns())
@@ -567,8 +571,20 @@ class BackupTests(unittest.TestCase):
         self,
     ) -> None:
         os.environ["BACKUP_AWS_ROLE_ARN"] = "arn:aws:iam::123456789012:role/backup"
-        with self.assertRaisesRegex(backup.BackupError, "BACKUP_AWS_ACCESS_KEY_ID"):
+        with self.assertRaisesRegex(
+            backup.BackupError,
+            "BACKUP_AWS_ACCESS_KEY_ID cannot be combined with BACKUP_AWS_ROLE_ARN",
+        ):
             backup.destination_credentials()
+        # The conflicting setting is named, even without a role.
+        with patch.dict(
+            os.environ,
+            {"BACKUP_AWS_ROLE_ARN": "", "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE": "/token"},
+        ):
+            with self.assertRaisesRegex(
+                backup.BackupError, "combined with BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"
+            ):
+                backup.destination_credentials()
         for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
             del os.environ[f"BACKUP_AWS_{name}"]
         with self.assertRaisesRegex(
@@ -1115,15 +1131,20 @@ class ConfigurationCoverageTests(unittest.TestCase):
 
     def test_entrypoint_recovery_inputs_are_classified(self) -> None:
         entrypoint = (MODULE.parent / "entrypoint.py").read_text()
-        # Every environment input goes through one of these helpers.
+        # Every environment input goes through one of the helpers in settings.py.
         options = set(
             re.findall(
-                r'\b(?:env|required|flag|integer|positive_int)\(\s*"([A-Z][A-Z0-9_]*)"',
+                r"\b(?:env|required|flag|integer|positive_int)\(\s*"
+                r"""(["'])([A-Z][A-Z0-9_]*)\1""",
                 entrypoint,
             )
         )
+        options = {name for _, name in options}
         self.assertIn("VAULTWARDEN_ADMIN_TOKEN", options)
-        self.assertEqual(entrypoint.count("os.environ.get("), 1, "Only in env()")
+        # Read with single quotes inside f-strings.
+        self.assertIn("FLY_MACHINE_ID", options)
+        self.assertNotIn("os.environ.get(", entrypoint)
+        self.assertNotIn("os.getenv(", entrypoint)
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),
             set(),

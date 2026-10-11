@@ -32,6 +32,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
+from settings import ConfigError, env, flag, positive_int, required
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
@@ -141,25 +142,8 @@ class PayloadManifestV1(CaptureRecordV1):
     missing_files: list[MissingFile]
 
 
-class BackupError(ValueError):
-    """A diagnostic written by this module that is safe to include in logs."""
-
-
-def positive_int(name: str, default: int) -> int:
-    try:
-        value = int(os.environ.get(name, str(default)))
-    except ValueError:
-        raise BackupError(f"{name} must be a positive integer") from None
-    if value <= 0:
-        raise BackupError(f"{name} must be positive")
-    return value
-
-
-def required(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise BackupError(f"{name} is required")
-    return value
+# A diagnostic that is safe to include in logs, like configuration errors.
+BackupError = ConfigError
 
 
 def utc(timestamp: float) -> str:
@@ -554,22 +538,25 @@ def publish(store: Store, archive: Path, record: CaptureRecordV1) -> None:
 
 def destination_credentials() -> StaticCredentials | WebIdentity:
     """Destination credentials; the application's AWS_* are never used as a fallback."""
-    role_arn = os.environ.get("BACKUP_AWS_ROLE_ARN")
-    token_file = os.environ.get("BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE")
+    role_arn = env("BACKUP_AWS_ROLE_ARN")
+    token_file = env("BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE")
     if not role_arn and not token_file:
         return StaticCredentials(
             access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
             secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
-            session_token=os.environ.get("BACKUP_AWS_SESSION_TOKEN"),
+            session_token=env("BACKUP_AWS_SESSION_TOKEN") or None,
         )
     # Unlike the AWS SDKs, which prefer static keys, refuse ambiguous configuration.
+    conflict = (
+        "BACKUP_AWS_ROLE_ARN" if role_arn else "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"
+    )
     for name in (
         "BACKUP_AWS_ACCESS_KEY_ID",
         "BACKUP_AWS_SECRET_ACCESS_KEY",
         "BACKUP_AWS_SESSION_TOKEN",
     ):
-        if os.environ.get(name):
-            raise BackupError(f"{name} cannot be combined with BACKUP_AWS_ROLE_ARN")
+        if env(name):
+            raise BackupError(f"{name} cannot be combined with {conflict}")
     if not token_file and not FLY_API_SOCKET.is_socket():
         raise BackupError(
             "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE is required outside Fly.io"
@@ -577,8 +564,7 @@ def destination_credentials() -> StaticCredentials | WebIdentity:
     return WebIdentity(
         role_arn=required("BACKUP_AWS_ROLE_ARN"),
         token_file=token_file or None,
-        session_name=os.environ.get("BACKUP_AWS_ROLE_SESSION_NAME")
-        or "vaultwarden-backup",
+        session_name=env("BACKUP_AWS_ROLE_SESSION_NAME", "vaultwarden-backup"),
     )
 
 
@@ -589,7 +575,7 @@ def main(work: Path) -> float:
         prefix=required("BACKUP_PREFIX"),
         region=required("BACKUP_AWS_REGION"),
         credentials=destination_credentials(),
-        endpoint_url=os.environ.get("BACKUP_AWS_ENDPOINT_URL_S3"),
+        endpoint_url=env("BACKUP_AWS_ENDPOINT_URL_S3") or None,
     )
     interval = positive_int("BACKUP_INTERVAL_SECONDS", 3600)
     now = time.time()
@@ -598,11 +584,11 @@ def main(work: Path) -> float:
         return previous + interval
     # Restore and application migrations must finish before opening SQLite.
     with urlopen(
-        f"http://127.0.0.1:{os.environ.get('ROCKET_PORT', '8080')}/alive", timeout=5
+        f"http://127.0.0.1:{env('ROCKET_PORT', '8080')}/alive", timeout=5
     ) as response:
         if response.status != 200:
             raise BackupError("Vaultwarden is not ready")
-    if os.environ.get("GEESEFS_ENABLED", "true") != "true":
+    if not flag("GEESEFS_ENABLED", True):
         raise BackupError("scheduled backup requires S3-backed attachments and sends")
     maximum = positive_int("BACKUP_MAX_BYTES", 1024**3)
     if maximum > 4 * 1024**3:
@@ -653,7 +639,7 @@ def main(work: Path) -> float:
         region=required("AWS_REGION"),
         # Static keys or web identity, resolved like GeeseFS and Litestream do.
         credentials=None,
-        endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3"),
+        endpoint_url=env("AWS_ENDPOINT_URL_S3") or None,
     )
     capture_files(
         source_store,
@@ -802,7 +788,7 @@ def supervise(command: Sequence[str]) -> int:
                     deadline = now + positive_int("BACKUP_TIMEOUT_SECONDS", 1800)
                     staging = tempfile.TemporaryDirectory(
                         prefix="vaultwarden-backup-",
-                        dir=os.environ.get("BACKUP_TMP_DIR"),
+                        dir=env("BACKUP_TMP_DIR") or None,
                     )
                     capture = subprocess.Popen(
                         [sys.executable, __file__, "once", staging.name],
@@ -840,7 +826,8 @@ def cli() -> int:
         level=logging.INFO,
         format="%(asctime)s level=%(levelname)s component=backup %(message)s",
     )
-    logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
+    # Its refresh warnings include SDK error messages, which can contain account data.
+    logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
     if sys.argv[1] == "supervise":
         return supervise(sys.argv[2:])
     if sys.argv[1] == "once":
