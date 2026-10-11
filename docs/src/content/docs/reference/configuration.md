@@ -15,12 +15,16 @@ the admin panel don't persist. Change the variables instead.
 
 ## S3 storage
 
-`fly storage create` sets these as secrets for you.
+`fly storage create` sets these as secrets for you. With an AWS S3 bucket, you can use an IAM role instead of access
+keys, see [AWS S3 without access keys](../../guides/aws-oidc/).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AWS_ACCESS_KEY_ID` | required | Access key for the application bucket. |
-| `AWS_SECRET_ACCESS_KEY` | required | Secret key for the application bucket. |
+| `AWS_ACCESS_KEY_ID` | required without a role | Access key for the application bucket. Takes precedence over `AWS_ROLE_ARN`. |
+| `AWS_SECRET_ACCESS_KEY` | required without a role | Secret key for the application bucket. |
+| `AWS_ROLE_ARN` | unset | IAM role to assume with the OIDC token in `AWS_WEB_IDENTITY_TOKEN_FILE`. AWS S3 only. |
+| `AWS_WEB_IDENTITY_TOKEN_FILE` | set by Fly.io and EKS | File containing the OIDC token for `AWS_ROLE_ARN`. The entrypoint waits up to 30 seconds for it to appear. |
+| `AWS_ROLE_SESSION_NAME` | set by Fly.io | Role session name, visible in CloudTrail. |
 | `AWS_REGION` | required | Signing region of the bucket. |
 | `AWS_ENDPOINT_URL_S3` | AWS S3 in `AWS_REGION` | S3 endpoint URL. Required for any provider other than AWS. |
 | `BUCKET_NAME` | required | Bucket holding the Litestream replica (`vaultwarden.db/`) and files (`data/`). |

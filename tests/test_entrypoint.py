@@ -243,6 +243,26 @@ class FakeS3:
         return {"Body": io.BytesIO(self.objects[Bucket, Key])}
 
 
+class TokenFileTests(EntrypointTestCase):
+    def test_waits_for_token_file(self) -> None:
+        token = self.root / "token"
+        os.environ["AWS_WEB_IDENTITY_TOKEN_FILE"] = str(token)
+        threading.Timer(0.3, token.write_text, ("jwt",)).start()
+        entrypoint.wait_for_token_file()
+        self.assertTrue(token.exists())
+
+    def test_missing_token_file_fails(self) -> None:
+        os.environ["AWS_WEB_IDENTITY_TOKEN_FILE"] = str(self.root / "missing")
+        with (
+            patch.object(entrypoint, "TOKEN_FILE_TIMEOUT_SECONDS", 0.2),
+            self.assertRaisesRegex(entrypoint.StartupError, "missing"),
+        ):
+            entrypoint.wait_for_token_file()
+
+    def test_without_web_identity(self) -> None:
+        entrypoint.wait_for_token_file()
+
+
 class MountTests(EntrypointTestCase):
     def test_custom_endpoint(self) -> None:
         with patch.object(entrypoint, "run") as run:

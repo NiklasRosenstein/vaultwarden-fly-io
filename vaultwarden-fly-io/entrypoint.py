@@ -35,6 +35,8 @@ REPLICA_PATH = "vaultwarden.db"
 # Time Litestream gets to push its last frames when the S3 monitor restarts the machine.
 # This matches the time the backup supervisor (backup.py) gives Litestream when stopped.
 RESTART_GRACE_SECONDS = 60
+# How long to wait for the web identity token file, which Fly.io writes shortly after boot.
+TOKEN_FILE_TIMEOUT_SECONDS = 30
 
 
 class StartupError(Exception):
@@ -81,6 +83,18 @@ def run(command: Sequence[str]) -> None:
 #
 # Startup
 #
+
+
+def wait_for_token_file() -> None:
+    path = env("AWS_WEB_IDENTITY_TOKEN_FILE")
+    if not path or Path(path).exists():
+        return
+    LOG.info("waiting for the web identity token file %s", path)
+    deadline = time.monotonic() + TOKEN_FILE_TIMEOUT_SECONDS
+    while not Path(path).exists():
+        if time.monotonic() >= deadline:
+            raise StartupError(f"web identity token file {path} does not exist")
+        time.sleep(0.5)
 
 
 def mount_s3() -> None:
@@ -547,6 +561,7 @@ def main() -> int:
         else None
     )
     backup = flag("BACKUP_ENABLED", False)
+    wait_for_token_file()
     mount_s3()
     write_rsa_key()
     write_config()

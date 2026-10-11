@@ -33,7 +33,8 @@ Vaultwarden encrypts attachments and Sends itself, so the objects are stored wit
 
 ## Startup sequence
 
-1. Mount the bucket at `/mnt/s3` with GeeseFS (if `GEESEFS_ENABLED`).
+1. Wait for the OIDC token file, if `AWS_WEB_IDENTITY_TOKEN_FILE` is set, then mount the bucket at `/mnt/s3` with
+   GeeseFS (if `GEESEFS_ENABLED`).
 2. Write the RSA key pair from `VAULTWARDEN_RSA_PRIVATE_KEY`.
 3. Generate `config.json` from `VAULTWARDEN_*` variables and check that it is valid JSON.
 4. Idle here if `ENTRYPOINT_IDLE=true`.
