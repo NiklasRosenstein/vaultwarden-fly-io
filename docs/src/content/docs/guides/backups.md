@@ -46,17 +46,48 @@ Vaultwarden keeps serving requests during the capture. To restore an archive, se
 
 ## Authenticate with OIDC
 
-Instead of long-lived access keys, the worker can exchange an OIDC token (a Fly.io or Kubernetes service account JWT)
-for temporary AWS credentials through
+Instead of long-lived access keys, the worker can exchange an OIDC token for temporary AWS credentials through
 [`AssumeRoleWithWebIdentity`](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html):
 
 ```
-OIDC token file → AWS STS → temporary AWS credentials → backup bucket
+OIDC token (Fly.io machine or Kubernetes service account) → AWS STS → temporary AWS credentials → backup bucket
 ```
+
+Credentials are requested from the regional STS endpoint of `BACKUP_AWS_REGION` and refreshed automatically before
+they expire. Each refresh uses a fresh token.
+
+### On Fly.io
+
+Fly.io issues OIDC tokens to every machine (see
+[OpenID Connect](https://fly.io/docs/security/openid-connect/)). The worker requests one from the machine API for
+each refresh, with the audience `sts.amazonaws.com`.
+
+1. In AWS IAM, add an OpenID Connect identity provider with the URL `https://oidc.fly.io/<org-slug>` and the audience
+   `sts.amazonaws.com`.
+2. Create a role that trusts it. The token's subject is `<org-slug>:<app-name>:<machine-name>`, so restrict the trust
+   policy to your app:
+
+   ```json
+   "Condition": {
+     "StringEquals": { "oidc.fly.io/<org-slug>:aud": "sts.amazonaws.com" },
+     "StringLike": { "oidc.fly.io/<org-slug>:sub": "<org-slug>:<app-name>:*" }
+   }
+   ```
+
+   Grant the role the [destination permissions](#permissions).
+3. Replace the access keys with:
+
+   ```sh
+   BACKUP_AWS_ROLE_ARN=arn:aws:iam::<account>:role/vaultwarden-backup
+   BACKUP_AWS_REGION=<bucket region>
+   ```
+
+### Elsewhere
 
 1. In AWS IAM, add your token issuer as an OIDC identity provider, and create a role that trusts it. Restrict the
    trust policy to your token's audience and subject, and grant the role the [destination permissions](#permissions).
 2. Make the token available to the container as a file, for example a projected service account token on Kubernetes.
+   The file is read again on every refresh, so tokens that are rotated in place keep working.
 3. Replace the access keys with:
 
    ```sh
@@ -65,8 +96,7 @@ OIDC token file → AWS STS → temporary AWS credentials → backup bucket
    BACKUP_AWS_REGION=<bucket region>
    ```
 
-Credentials are requested from the regional STS endpoint of `BACKUP_AWS_REGION` and refreshed automatically before
-they expire. The token file is read again on every refresh, so tokens that are rotated in place keep working.
+### Isolation
 
 This only works with AWS S3. The worker only uses the `BACKUP_AWS_*` settings: it ignores `AWS_ROLE_ARN`,
 `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ENDPOINT_URL_*`, which belong to the source bucket. Unlike the AWS SDKs, which

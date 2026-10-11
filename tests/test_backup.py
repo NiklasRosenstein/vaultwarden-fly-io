@@ -13,12 +13,15 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import unittest
 from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from socketserver import UnixStreamServer
 from typing import IO, TYPE_CHECKING, Any, BinaryIO, Self, TypedDict, cast
 from unittest.mock import Mock, patch
 
@@ -672,6 +675,81 @@ class BackupTests(unittest.TestCase):
             store.client.meta.endpoint_url, "https://s3.eu-west-1.amazonaws.com"
         )
 
+    def fly_api(self, status: int = 200) -> list[tuple[str, str, object]]:
+        """Serves OIDC tokens like the Fly.io machine API and records the requests."""
+        requests: list[tuple[str, str, object]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                requests.append((self.command, self.path, json.loads(body)))
+                self.send_response(status)
+                self.end_headers()
+                self.wfile.write(f"fly-jwt-{len(requests)}\n".encode())
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        path = self.root / "fly-api.sock"
+        server = UnixStreamServer(str(path), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        patcher = patch.object(backup, "FLY_API_SOCKET", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return requests
+
+    def test_web_identity_requests_tokens_from_fly_api(self) -> None:
+        requests = self.fly_api()
+        for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
+            del os.environ[f"BACKUP_AWS_{name}"]
+        os.environ["BACKUP_AWS_ROLE_ARN"] = "arn:aws:iam::123456789012:role/backup"
+        identity = backup.destination_credentials()
+        self.assertEqual(
+            identity,
+            backup.WebIdentity(
+                "arn:aws:iam::123456789012:role/backup", None, "vaultwarden-backup"
+            ),
+        )
+        tokens: list[object] = []
+
+        def api_call(
+            client: object, operation: str, params: dict[str, object]
+        ) -> dict[str, object]:
+            tokens.append(params["WebIdentityToken"])
+            return {
+                "Credentials": {
+                    "AccessKeyId": "temporary",
+                    "SecretAccessKey": "temporary-secret",
+                    "SessionToken": "temporary-session",
+                    # Inside botocore's advisory window: every access refreshes.
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=12),
+                },
+            }
+
+        store = backup.s3_store(
+            bucket="backups",
+            prefix="vaultwarden",
+            region="eu-west-1",
+            credentials=identity,
+        )
+        credentials = cast(Any, store.client)._request_signer._credentials
+        with patch("botocore.client.BaseClient._make_api_call", api_call):
+            credentials.get_frozen_credentials()
+            credentials.get_frozen_credentials()
+        # Each refresh requests a fresh token for the AWS STS audience.
+        self.assertEqual(tokens, ["fly-jwt-1", "fly-jwt-2"])
+        self.assertEqual(
+            requests, [("POST", "/v1/tokens/oidc", {"aud": "sts.amazonaws.com"})] * 2
+        )
+
+    def test_fly_api_errors_are_reported(self) -> None:
+        self.fly_api(status=500)
+        loader = backup.FlyTokenLoader(str(backup.FLY_API_SOCKET))
+        with self.assertRaisesRegex(backup.BackupError, "500"):
+            loader()
+
     def test_destination_does_not_inherit_source_endpoint(self) -> None:
         store = backup.s3_store(
             bucket="backups",
@@ -1036,15 +1114,16 @@ class ConfigurationCoverageTests(unittest.TestCase):
                 )
 
     def test_entrypoint_recovery_inputs_are_classified(self) -> None:
-        entrypoint = (MODULE.parent / "entrypoint.sh").read_text()
-        options = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)", entrypoint))
-        options.update(re.findall(r"assert_is_set\s+([A-Z][A-Z0-9_]*)", entrypoint))
-        # The entrypoint owns these paths rather than accepting them as inputs.
-        options -= {
-            "VAULTWARDEN_CONFIG_PATH",
-            "LITESTREAM_DATABASE_PATH",
-            "S3_MONITOR_FAILED_MARKER",
-        }
+        entrypoint = (MODULE.parent / "entrypoint.py").read_text()
+        # Every environment input goes through one of these helpers.
+        options = set(
+            re.findall(
+                r'\b(?:env|required|flag|integer|positive_int)\(\s*"([A-Z][A-Z0-9_]*)"',
+                entrypoint,
+            )
+        )
+        self.assertIn("VAULTWARDEN_ADMIN_TOKEN", options)
+        self.assertEqual(entrypoint.count("os.environ.get("), 1, "Only in env()")
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),
             set(),

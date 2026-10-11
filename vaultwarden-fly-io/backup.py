@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -18,6 +19,7 @@ import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import closing
 from datetime import UTC, datetime
+from http.client import HTTPConnection
 from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple, cast
@@ -34,12 +36,15 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     import boto3
+    from botocore.credentials import FileWebIdentityTokenLoader
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import ObjectTypeDef
 
 LOG = logging.getLogger("backup")
 SCHEMA_VERSION: Final = 1
 DATA_DIR = Path("/data")
+# Fly.io's machine API, which issues OIDC tokens for the machine.
+FLY_API_SOCKET = Path("/.fly/api")
 # Only image inputs needed for recovery belong in the encrypted environment export.
 RECOVERY_FIELDS = """
 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_ROLE_ARN AWS_ROLE_SESSION_NAME
@@ -242,8 +247,45 @@ class StaticCredentials(NamedTuple):
 
 class WebIdentity(NamedTuple):
     role_arn: str
-    token_file: str
+    # None requests each token from the Fly.io machine API instead of a file.
+    token_file: str | None
     session_name: str
+
+
+class UnixHTTPConnection(HTTPConnection):
+    def __init__(self, path: str, timeout: float) -> None:
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self.socket_path)
+        self.sock = sock
+
+
+class FlyTokenLoader:
+    """Requests a fresh OIDC token for AWS STS from the Fly.io machine API."""
+
+    def __init__(self, socket_path: str) -> None:
+        self.socket_path = socket_path
+
+    def __call__(self) -> str:
+        connection = UnixHTTPConnection(self.socket_path, timeout=10)
+        try:
+            connection.request(
+                "POST",
+                "/v1/tokens/oidc",
+                body=json.dumps({"aud": "sts.amazonaws.com"}),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            token = response.read().decode().strip()
+        finally:
+            connection.close()
+        if response.status != 200 or not token:
+            raise BackupError(f"Fly.io OIDC token request failed ({response.status})")
+        return token
 
 
 def web_identity_session(identity: WebIdentity, region: str) -> boto3.Session:
@@ -259,12 +301,16 @@ def web_identity_session(identity: WebIdentity, region: str) -> boto3.Session:
     session.set_config_variable("region", region)
     # The source's AWS_ENDPOINT_URL_* must not redirect STS either.
     session.set_config_variable("ignore_configured_endpoint_urls", True)
+    # The token loader is called on every refresh, so rotated tokens are picked up.
+    if identity.token_file is None:
+        token_source, token_loader = str(FLY_API_SOCKET), FlyTokenLoader
+    else:
+        token_source, token_loader = identity.token_file, None
     profile = {
         "role_arn": identity.role_arn,
-        "web_identity_token_file": identity.token_file,
+        "web_identity_token_file": token_source,
         "role_session_name": identity.session_name,
     }
-    # The token file is re-read on every refresh, so rotated tokens are picked up.
     provider = AssumeRoleWithWebIdentityProvider(
         load_config=lambda: {"profiles": {"backup": profile}},
         client_creator=lambda service, **kwargs: session.create_client(
@@ -272,6 +318,8 @@ def web_identity_session(identity: WebIdentity, region: str) -> boto3.Session:
         ),
         profile_name="backup",
         disable_env_vars=True,
+        # botocore only calls the loader; the stubs name the file-based class.
+        token_loader_cls=cast("type[FileWebIdentityTokenLoader] | None", token_loader),
     )
     session.register_component("credential_provider", CredentialResolver([provider]))
     return boto3.Session(botocore_session=session)
@@ -522,9 +570,13 @@ def destination_credentials() -> StaticCredentials | WebIdentity:
     ):
         if os.environ.get(name):
             raise BackupError(f"{name} cannot be combined with BACKUP_AWS_ROLE_ARN")
+    if not token_file and not FLY_API_SOCKET.is_socket():
+        raise BackupError(
+            "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE is required outside Fly.io"
+        )
     return WebIdentity(
         role_arn=required("BACKUP_AWS_ROLE_ARN"),
-        token_file=required("BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"),
+        token_file=token_file or None,
         session_name=os.environ.get("BACKUP_AWS_ROLE_SESSION_NAME")
         or "vaultwarden-backup",
     )
@@ -788,6 +840,7 @@ def cli() -> int:
         level=logging.INFO,
         format="%(asctime)s level=%(levelname)s component=backup %(message)s",
     )
+    logging.getLogger("botocore.credentials").setLevel(logging.WARNING)
     if sys.argv[1] == "supervise":
         return supervise(sys.argv[2:])
     if sys.argv[1] == "once":

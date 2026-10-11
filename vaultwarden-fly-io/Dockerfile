@@ -13,13 +13,10 @@ RUN arch=$(cat /tmp/arch) &&\
     chmod +x geesefs
 
 FROM ghcr.io/dani-garcia/vaultwarden:1.37.4-alpine
-RUN apk add age envsubst fuse jq minio-client openssl sudo python3 py3-boto3 py3-pydantic && \
-    ln -s /usr/bin/mcli /usr/bin/mc
+RUN apk add age envsubst fuse openssl python3 py3-boto3 py3-pydantic
 COPY --from=litestream /litestream /usr/bin/litestream
-COPY --from=ghcr.io/niklasrosenstein/headscale-fly-io:0.4.3-headscale-0.23.0 /etc/headscale/litestream-entrypoint.sh /
 COPY --from=geesefs /geesefs /usr/bin/geesefs
-COPY entrypoint.sh .
-COPY backup.py /backup.py
+COPY entrypoint.py backup.py /
 
 # NOTE: I tried to make this work, but mounting a directory with GeeseFS and using the --uid option seems to break
 #       filesystem permissions for the mounted directory entirely (not just the vaultwarden user, even root gets
@@ -34,4 +31,4 @@ COPY backup.py /backup.py
 # Make Vaultwarden listen on port 8080.
 ENV ROCKET_PORT=8080
 
-ENTRYPOINT [ "/bin/sh", "/entrypoint.sh" ]
+ENTRYPOINT [ "python3", "/entrypoint.py" ]
