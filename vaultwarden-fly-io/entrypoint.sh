@@ -83,7 +83,6 @@ mount_s3() {
 }
 
 S3_MONITOR_FAILED_MARKER=/tmp/s3-monitor-failed
-S3_MONITOR_MC_CONFIG_DIR=/tmp/s3-monitor-mc
 
 run_with_deadline() {
   # Run a command (output discarded) and wait at most $1 seconds for it to finish. Unlike `timeout`, this never blocks
@@ -145,8 +144,10 @@ check_s3_mount() {
 }
 
 check_s3_bucket() {
-  # Returns 0 if the S3 bucket can be reached directly, without going through GeeseFS.
-  run_with_deadline "$GEESEFS_MONITOR_TIMEOUT" mc --config-dir "$S3_MONITOR_MC_CONFIG_DIR" ls "s3monitor/$BUCKET_NAME/"
+  # Returns 0 if the S3 bucket can be reached directly, without going through GeeseFS. boto3 resolves credentials
+  # (static keys or web identity), region and endpoint from the standard AWS_* variables.
+  run_with_deadline "$GEESEFS_MONITOR_TIMEOUT" python3 -c \
+    'import os, boto3; boto3.client("s3").list_objects_v2(Bucket=os.environ["BUCKET_NAME"], MaxKeys=1)'
 }
 
 monitor_s3() {
@@ -155,12 +156,6 @@ monitor_s3() {
   trap - EXIT
   main_pid="$1"
   failures=0
-  check_bucket=true
-  if ! mc --config-dir "$S3_MONITOR_MC_CONFIG_DIR" alias set s3monitor "${AWS_ENDPOINT_URL_S3:-}" \
-    "${AWS_ACCESS_KEY_ID:-}" "${AWS_SECRET_ACCESS_KEY:-}" --api S3v4 >/dev/null 2>&1; then
-    warn "s3-monitor: could not configure mc, will not check that S3 is reachable before restarting"
-    check_bucket=false
-  fi
   info "s3-monitor: started (interval ${GEESEFS_MONITOR_INTERVAL}s, timeout ${GEESEFS_MONITOR_TIMEOUT}s," \
     "failure threshold ${GEESEFS_MONITOR_FAILURE_THRESHOLD}, write check ${GEESEFS_MONITOR_WRITE_CHECK})"
   while kill -0 "$main_pid" 2>/dev/null; do
@@ -181,7 +176,7 @@ monitor_s3() {
     fi
     # The machine's disk does not survive a restart: Litestream must be able to upload its pending changes on shutdown
     # and restore the database on startup. During an S3 outage, keep serving from the local database instead.
-    if [ "$check_bucket" = "true" ] && ! check_s3_bucket; then
+    if ! check_s3_bucket; then
       warn "s3-monitor: /mnt/s3 is broken, but S3 itself is unreachable too; not restarting while that is the case" \
         "to avoid losing database changes that Litestream has not uploaded yet"
       continue

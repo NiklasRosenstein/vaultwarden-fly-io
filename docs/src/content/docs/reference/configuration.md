@@ -127,14 +127,13 @@ See the [backups guide](../../guides/backups/) for how these fit together.
 | `BACKUP_ENABLED` | `false` | Run the backup worker. Requires GeeseFS. |
 | `BACKUP_BUCKET_NAME` | required when enabled | Destination bucket, separate from `BUCKET_NAME`. |
 | `BACKUP_PREFIX` | required when enabled | Application-specific key prefix, for example `vaultwarden/`. |
-| `BACKUP_AUTH_MODE` | `static` | How the worker authenticates to the destination: `static` uses the access keys below, `web-identity` exchanges an OIDC token for temporary AWS credentials (see [Authenticate with OIDC](../../guides/backups/#authenticate-with-oidc)). |
-| `BACKUP_AWS_ACCESS_KEY_ID` | required for `static` | Destination access key. The source credentials are never used as a fallback. Must be unset for `web-identity`. |
-| `BACKUP_AWS_SECRET_ACCESS_KEY` | required for `static` | Destination secret key. Must be unset for `web-identity`. |
-| `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for temporary destination credentials. You must refresh it yourself. Must be unset for `web-identity`. |
-| `BACKUP_AWS_ROLE_ARN` | required for `web-identity` | IAM role to assume with `AssumeRoleWithWebIdentity`. The ambient `AWS_ROLE_ARN` is never used. |
-| `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | required for `web-identity` | File containing the OIDC token (JWT). It is read again on every refresh, so it may be rotated in place. The ambient `AWS_WEB_IDENTITY_TOKEN_FILE` is never used. |
+| `BACKUP_AWS_ACCESS_KEY_ID` | required without a role | Destination access key. The source credentials are never used as a fallback. |
+| `BACKUP_AWS_SECRET_ACCESS_KEY` | required without a role | Destination secret key. |
+| `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for temporary destination credentials. You must refresh it yourself. |
+| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to assume with an OIDC token instead of using access keys (see [Authenticate with OIDC](../../guides/backups/#authenticate-with-oidc)). Can't be combined with the access keys above. The application's `AWS_ROLE_ARN` is never used. |
+| `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | required with a role | File containing the OIDC token (JWT). It is read again on every refresh, so it may be rotated in place. The application's `AWS_WEB_IDENTITY_TOKEN_FILE` is never used. |
 | `BACKUP_AWS_ROLE_SESSION_NAME` | `vaultwarden-backup` | Role session name, visible in CloudTrail. |
-| `BACKUP_AWS_REGION` | required when enabled | Destination signing region. With `web-identity`, also the region of the STS endpoint. |
+| `BACKUP_AWS_REGION` | required when enabled | Destination signing region. With a role, also the region of the STS endpoint. |
 | `BACKUP_AWS_ENDPOINT_URL_S3` | AWS regional endpoint | Endpoint of an S3-compatible destination that supports conditional PUT and SHA-256 checksums. |
 | `BACKUP_AGE_RECIPIENT` | required when enabled | Public key for recovery. Keep the private key outside this deployment, separate from `AGE_SECRET_KEY`. |
 | `BACKUP_INTERVAL_SECONDS` | `3600` | Time between capture start times, including degraded backups. The schedule survives restarts through the completion manifests in S3. |

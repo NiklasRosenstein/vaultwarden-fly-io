@@ -536,9 +536,7 @@ class BackupTests(unittest.TestCase):
                 "bucket": "source",
                 "prefix": "data",
                 "region": "eu-central-1",
-                "credentials": backup.StaticCredentials(
-                    "source-key", "source-secret", "source-session"
-                ),
+                "credentials": None,
                 "endpoint_url": "https://source.invalid",
             },
         )
@@ -547,7 +545,6 @@ class BackupTests(unittest.TestCase):
         for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
             del os.environ[f"BACKUP_AWS_{name}"]
         os.environ.update(
-            BACKUP_AUTH_MODE="web-identity",
             BACKUP_AWS_ROLE_ARN="arn:aws:iam::123456789012:role/backup",
             BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE="/var/run/secrets/aws/token",
         )
@@ -561,22 +558,39 @@ class BackupTests(unittest.TestCase):
                 "vaultwarden-backup",
             ),
         )
-        self.assertEqual(
-            source["credentials"],
-            backup.StaticCredentials("source-key", "source-secret", "source-session"),
-        )
+        self.assertIsNone(source["credentials"])
 
-    def test_web_identity_rejects_static_credentials_and_unknown_modes(self) -> None:
-        os.environ.update(
-            BACKUP_AUTH_MODE="web-identity",
-            BACKUP_AWS_ROLE_ARN="arn:aws:iam::123456789012:role/backup",
-            BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE="/var/run/secrets/aws/token",
-        )
+    def test_web_identity_rejects_static_credentials_and_partial_settings(
+        self,
+    ) -> None:
+        os.environ["BACKUP_AWS_ROLE_ARN"] = "arn:aws:iam::123456789012:role/backup"
         with self.assertRaisesRegex(backup.BackupError, "BACKUP_AWS_ACCESS_KEY_ID"):
             backup.destination_credentials()
-        os.environ["BACKUP_AUTH_MODE"] = "oidc"
-        with self.assertRaisesRegex(backup.BackupError, "BACKUP_AUTH_MODE"):
+        for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
+            del os.environ[f"BACKUP_AWS_{name}"]
+        with self.assertRaisesRegex(
+            backup.BackupError, "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"
+        ):
             backup.destination_credentials()
+        del os.environ["BACKUP_AWS_ROLE_ARN"]
+        os.environ["BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"] = "/var/run/secrets/aws/token"
+        with self.assertRaisesRegex(backup.BackupError, "BACKUP_AWS_ROLE_ARN"):
+            backup.destination_credentials()
+
+    def test_source_uses_standard_credential_chain(self) -> None:
+        store = backup.s3_store(
+            bucket="source",
+            prefix="data",
+            region="eu-central-1",
+            credentials=None,
+            endpoint_url="https://source.invalid",
+        )
+        credentials = cast(Any, store.client)._request_signer._credentials
+        self.assertEqual(credentials.method, "env")
+        self.assertEqual(
+            tuple(credentials.get_frozen_credentials()),
+            ("source-key", "source-secret", "source-session", None),
+        )
 
     def test_s3_factory_forwards_only_explicit_credentials(self) -> None:
         # Ambient source credentials in setUp must not replace destination inputs.
@@ -1030,7 +1044,6 @@ class ConfigurationCoverageTests(unittest.TestCase):
             "VAULTWARDEN_CONFIG_PATH",
             "LITESTREAM_DATABASE_PATH",
             "S3_MONITOR_FAILED_MARKER",
-            "S3_MONITOR_MC_CONFIG_DIR",
         }
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),

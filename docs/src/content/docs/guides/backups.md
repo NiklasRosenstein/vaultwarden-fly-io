@@ -60,7 +60,6 @@ OIDC token file → AWS STS → temporary AWS credentials → backup bucket
 3. Replace the access keys with:
 
    ```sh
-   BACKUP_AUTH_MODE=web-identity
    BACKUP_AWS_ROLE_ARN=arn:aws:iam::<account>:role/vaultwarden-backup
    BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/aws/token
    BACKUP_AWS_REGION=<bucket region>
@@ -69,10 +68,9 @@ OIDC token file → AWS STS → temporary AWS credentials → backup bucket
 Credentials are requested from the regional STS endpoint of `BACKUP_AWS_REGION` and refreshed automatically before
 they expire. The token file is read again on every refresh, so tokens that are rotated in place keep working.
 
-This mode only works with AWS S3. The worker only uses the `BACKUP_AWS_*` settings: it ignores `AWS_ROLE_ARN`,
-`AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ENDPOINT_URL_*`, which belong to the source bucket. Setting static
-`BACKUP_AWS_*` keys together with `web-identity` is an error. The source bucket (GeeseFS, Litestream and the backup
-worker's reads of attachments) keeps using the application's `AWS_*` access keys.
+This only works with AWS S3. The worker only uses the `BACKUP_AWS_*` settings: it ignores `AWS_ROLE_ARN`,
+`AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ENDPOINT_URL_*`, which belong to the source bucket. Unlike the AWS SDKs, which
+silently prefer access keys, setting both access keys and a role is an error.
 
 :::caution[Keep the machine running]
 A stopped Fly Machine can't run backups. To meet the interval, set `min_machines_running = 1` or turn off
