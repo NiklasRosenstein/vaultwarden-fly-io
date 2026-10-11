@@ -10,7 +10,7 @@ Backups add a **separate copy**. On a schedule (every hour by default), the app 
 Sends and the keys needed to restore them into one archive. It encrypts the archive and uploads it to a second bucket.
 The app never deletes anything there.
 
-To restore an archive, see [Restore from a backup](../recovery/).
+To restore an archive, see [Restore from a backup](../restore-from-a-backup/).
 
 ## Set it up
 
@@ -40,8 +40,8 @@ To restore an archive, see [Restore from a backup](../recovery/).
      BACKUP_AGE_RECIPIENT=age1...
    ```
 
-   All options are in [Settings](../../reference/configuration/#scheduled-backups). For AWS S3 without access keys,
-   see [AWS S3 without access keys](../aws-oidc/).
+   All options are in [Settings](../../reference/settings/#scheduled-backups). For AWS S3 without access keys,
+   see [AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/).
 
 :::caution[Keep the machine running]
 A stopped machine can't make backups. Set `min_machines_running = 1` in `fly.toml`, or turn off
@@ -52,10 +52,10 @@ A stopped machine can't make backups. Set `min_machines_running = 1` in `fly.tom
 
 The backup credentials need:
 
-- **List** on `<prefix>/completed/` and `<prefix>/archives/`
+- **List** on `<prefix>/completed/` and `<prefix>/archives/*`
 - **Read** and **write** under both prefixes
 
-They don't need delete. Set up versioning and an expiry rule on the bucket yourself, so old archives are removed after
+They don't need delete. The bucket must support conditional uploads (`If-None-Match`) and SHA-256 checksums. Set up versioning and an expiry rule on the bucket yourself, so old archives are removed after
 a time you choose.
 
 ## Check that it works
@@ -66,6 +66,6 @@ The app doesn't alert you. Set up checks outside the app:
   `captured_at` is too old.
 - **Is the last backup complete?** If some attachments were missing, the backup is still written, with
   `status: degraded`. The database is safe, but some files are not in it. Alert on this separately.
-- **Can you restore it?** Try a [restore](../recovery/) in a test bucket from time to time.
+- **Can you restore it?** Try a [restore](../restore-from-a-backup/) in a test bucket from time to time.
 
-[How it works](../../reference/architecture/#backups) explains the archive format, the schedule and the limits.
+[How it works](../../reference/how-it-works/#backups) explains the archive format, the schedule and the limits.

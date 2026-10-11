@@ -14,7 +14,7 @@ A Fly.io machine loses its disk when it restarts. So this project keeps everythi
   makes the bucket look like a normal folder to Vaultwarden.
 - **Settings and keys** come from your `fly.toml` and Fly.io secrets.
 
-[How it works](../../reference/architecture/) has the details.
+[How it works](../../reference/how-it-works/) has the details.
 
 ## Cost
 
@@ -38,4 +38,4 @@ server.
 ## Not only Fly.io
 
 The image also runs on Docker or Kubernetes, with any S3-compatible bucket. See
-[Docker and Kubernetes](../../guides/kubernetes/).
+[Docker and Kubernetes](../../other-setups/docker-and-kubernetes/).

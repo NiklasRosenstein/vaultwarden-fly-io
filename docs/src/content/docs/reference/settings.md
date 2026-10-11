@@ -27,7 +27,7 @@ These are the settings most people change. Each one is also listed in its sectio
 ## S3 storage
 
 `fly storage create` sets these for you. On AWS S3 you can use a role instead of keys, see
-[AWS S3 without access keys](../../guides/aws-oidc/).
+[AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/).
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -125,7 +125,7 @@ same name, with `VAULTWARDEN_` in front.
 
 ### S3 mount monitor
 
-See [how the monitor works](../architecture/#s3-mount-monitor).
+See [how the monitor works](../how-it-works/#s3-mount-monitor).
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ See [how the monitor works](../architecture/#s3-mount-monitor).
 
 ## Scheduled backups
 
-See [Turn on backups](../../guides/backups/).
+See [Turn on backups](../../keep-your-data-safe/turn-on-backups/).
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ See [Turn on backups](../../guides/backups/).
 | `BACKUP_AWS_ACCESS_KEY_ID` | required without a role | Access key for the backup bucket. The app's keys are never used. |
 | `BACKUP_AWS_SECRET_ACCESS_KEY` | required without a role | Secret key for the backup bucket. |
 | `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for short-lived keys. You must renew it yourself. |
-| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to use instead of keys, see [AWS S3 without access keys](../../guides/aws-oidc/). Can't be used together with keys. |
+| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to use instead of keys, see [AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/). Can't be used together with keys. |
 | `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Fly.io machine API | File with the token for the role. Leave unset on Fly.io. Required elsewhere. |
 | `BACKUP_AWS_ROLE_SESSION_NAME` | `vaultwarden-backup` | Name shown in CloudTrail. |
 | `BACKUP_AWS_REGION` | required when on | Region of the backup bucket. |
@@ -162,5 +162,5 @@ See [Turn on backups](../../guides/backups/).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `IMPORT_DATABASE` | unset | Bucket key of a database to load on start, for example `import-db.sqlite`. See [Move from another server](../../guides/migration/). Remove it right after the import. |
+| `IMPORT_DATABASE` | unset | Bucket key of a database to load on start, for example `import-db.sqlite`. See [Move from another server](../../get-started/move-from-another-server/). Remove it right after the import. |
 | `ENTRYPOINT_IDLE` | `false` | Wait instead of starting, or instead of exiting on an error, so you can log in with `fly ssh console`. |

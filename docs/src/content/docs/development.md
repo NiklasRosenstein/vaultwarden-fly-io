@@ -32,7 +32,7 @@ Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. Run `uv l
 installs its runtime dependencies from Alpine packages.
 
 :::tip[Adding an environment variable]
-Every variable documented in the [configuration reference](../reference/configuration/) must be
+Every variable documented in the [Settings](../reference/settings/) page must be
 listed in `RECOVERY_FIELDS` or `RECOVERY_EXCLUSIONS` in `backup.py`. A test parses the tables on that page to check
 this.
 :::
@@ -49,7 +49,7 @@ npm ci
 npm run dev
 ```
 
-Pages are in `docs/src/content/docs/`. Link between pages with relative paths (`../guides/backups/`), so the links
+Pages are in `docs/src/content/docs/`. Link between pages with relative paths (`../reference/costs/`), so the links
 also work in previews.
 
 ## Releases

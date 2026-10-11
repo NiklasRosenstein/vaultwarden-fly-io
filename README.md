@@ -11,8 +11,8 @@
 
 <p align="center">
   <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/"><b>Documentation</b></a> ·
-  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/getting-started/installation/">Installation</a> ·
-  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/configuration/">Configuration</a>
+  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/get-started/install/">Installation</a> ·
+  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/settings/">Settings</a>
 </p>
 
 ## Quick start
@@ -27,5 +27,5 @@ cp fly.example.toml fly.toml   # set app, domain and admin token
 fly deploy && fly scale count 1
 ```
 
-See the [installation guide](https://niklasrosenstein.github.io/vaultwarden-fly-io/getting-started/installation/)
+See the [install guide](https://niklasrosenstein.github.io/vaultwarden-fly-io/get-started/install/)
 for the full walkthrough.

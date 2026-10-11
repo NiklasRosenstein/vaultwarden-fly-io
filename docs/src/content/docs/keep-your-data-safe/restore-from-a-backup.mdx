@@ -40,7 +40,7 @@ bucket.
 4. **Check for missing files.** If `missing_files` in `manifest.json` is not empty, those files are not in this
    archive. Try to get them from an older archive.
 
-5. **Restore** with the steps from [Move from another server](../migration/):
+5. **Restore** with the steps from [Move from another server](../../get-started/move-from-another-server/):
    - Use a **new** bucket.
    - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=import-db.sqlite`.
    - Upload `files/attachments/` and `files/sends/` to `data/` in the bucket.

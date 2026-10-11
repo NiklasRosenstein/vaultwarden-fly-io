@@ -16,12 +16,7 @@ So far, Fly.io doesn't charge bills under 5 USD on personal accounts. This is
 [not a promise](https://community.fly.io/t/does-fly-io-still-waive-5-invoices/25651).
 :::
 
-## Fly.io
-
-The smallest machine (`shared-cpu-1x`, 256 MB) costs about **2 USD a month** if it never stops. With auto-stop (on in
-`fly.example.toml`) you pay only while it runs.
-
-## Tigris
+## Bucket requests
 
 | Item | Price | Free each month |
 | --- | --- | --- |
@@ -52,8 +47,6 @@ uploaded. So this setting only limits the worst case:
 | `10s` (this image) | 259,200 | ~1.30 USD |
 | `60s` | 43,200 | ~0.22 USD |
 
-A longer interval means more changes are lost if the machine crashes. A normal stop uploads everything first.
-
 ## Typical totals
 
 | Scenario | Class A per month | Tigris cost |
@@ -62,5 +55,5 @@ A longer interval means more changes are lost if the machine crashes. A normal s
 | Always on, write check off | ~2,000 to ~100,000 | 0 to ~0.45 USD |
 | Auto-stopped, ~2 hours a day | ~8,000 to ~15,000 | 0 to ~0.03 USD |
 
-[Backups](../../guides/backups/) add a few thousand requests a month. Their storage grows with each archive, so set
+[Backups](../../keep-your-data-safe/turn-on-backups/) add a few thousand requests a month. Their storage grows with each archive, so set
 an expiry rule on the backup bucket.

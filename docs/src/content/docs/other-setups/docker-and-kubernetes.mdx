@@ -15,7 +15,7 @@ The image also runs outside Fly.io, with any S3-compatible bucket (AWS S3, Cloud
 - **No volume.** All data is in the bucket.
 - **Set `VAULTWARDEN_DOMAIN`.** Outside Fly.io there is no default.
 
-All other [settings](../../reference/configuration/) work the same. Vaultwarden listens on port `8080`.
+All other [settings](../../reference/settings/) work the same. Vaultwarden listens on port `8080`.
 
 ## Docker
 
@@ -49,7 +49,8 @@ for example `X-Forwarded-For`.
 
 ## Kubernetes
 
-Use one replica and the `Recreate` strategy. This stops the old pod before the new one starts.
+Use one replica and the `Recreate` strategy. This stops the old pod before the new one starts. Add a `Service` and
+`Ingress` as usual.
 
 <Tabs>
 <TabItem label="Deployment">
@@ -86,9 +87,6 @@ spec:
           readinessProbe:
             httpGet: { path: /alive, port: 8080 }
             periodSeconds: 10
-          resources:
-            requests: { cpu: 50m, memory: 256Mi }
-            limits: { memory: 512Mi }
 ```
 
 </TabItem>
@@ -114,23 +112,6 @@ stringData:
 ```
 
 </TabItem>
-<TabItem label="Service">
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: vaultwarden
-spec:
-  selector: { app: vaultwarden }
-  ports:
-    - port: 80
-      targetPort: 8080
-```
-
-Expose it with your usual `Ingress` or `Gateway` and TLS setup.
-
-</TabItem>
 </Tabs>
 
 <Aside title="Without a privileged container">
@@ -139,4 +120,4 @@ capability.
 </Aside>
 
 If the bucket mount breaks, the container exits and Kubernetes starts a new one. You don't need a liveness probe for
-this. See [S3 mount monitor](../../reference/architecture/#s3-mount-monitor).
+this. See [S3 mount monitor](../../reference/how-it-works/#s3-mount-monitor).
