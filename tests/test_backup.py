@@ -1067,7 +1067,7 @@ class SupervisorTests(unittest.TestCase):
 
 
 CONFIGURATION_REFERENCE = (
-    MODULE.parents[1] / "docs/src/content/docs/reference/configuration.md"
+    MODULE.parents[1] / "docs/src/content/docs/reference/settings.md"
 )
 
 

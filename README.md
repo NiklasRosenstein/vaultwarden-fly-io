@@ -11,8 +11,8 @@
 
 <p align="center">
   <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/"><b>Documentation</b></a> ·
-  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/getting-started/installation/">Installation</a> ·
-  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/configuration/">Configuration</a>
+  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/get-started/install/">Installation</a> ·
+  <a href="https://niklasrosenstein.github.io/vaultwarden-fly-io/reference/settings/">Settings</a>
 </p>
 
 ## Quick start
@@ -24,8 +24,8 @@ fly secrets set --app <app_name> \
   VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
   AGE_SECRET_KEY="$(age-keygen | tail -n1)"
 cp fly.example.toml fly.toml   # set app, domain and admin token
-fly deploy && fly scale count 1
+fly deploy --ha=false
 ```
 
-See the [installation guide](https://niklasrosenstein.github.io/vaultwarden-fly-io/getting-started/installation/)
+See the [install guide](https://niklasrosenstein.github.io/vaultwarden-fly-io/get-started/install/)
 for the full walkthrough.

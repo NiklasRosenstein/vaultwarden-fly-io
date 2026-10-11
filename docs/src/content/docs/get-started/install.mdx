@@ -1,0 +1,80 @@
+---
+title: Install
+description: Deploy Vaultwarden to Fly.io in six steps.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+## You need
+
+- A [Fly.io](https://fly.io/) account
+- The [`fly`](https://github.com/superfly/flyctl) command-line tool, logged in
+- The [`age`](https://github.com/FiloSottile/age) command-line tool, to create an encryption key
+
+## Steps
+
+<Steps>
+
+1. **Create the app.**
+
+   ```sh
+   fly app create <app_name>
+   ```
+
+2. **Create a bucket.** This also saves the bucket's credentials as secrets on the app.
+
+   ```sh
+   fly storage create --app <app_name> --name <app_name>
+   ```
+
+3. **Create two keys.** Vaultwarden signs logins with the RSA key. The age key encrypts the database copy.
+
+   ```sh
+   fly secrets set --app <app_name> \
+     VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
+     AGE_SECRET_KEY="$(age-keygen | tail -n1)"
+   ```
+
+   <Aside type="danger">
+   Without `AGE_SECRET_KEY` your database can't be restored. Keep a copy of both keys somewhere safe, outside Fly.io.
+   </Aside>
+
+4. **Create an admin password.** This prints a hashed version of the password you type.
+
+   ```sh
+   docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash
+   ```
+
+5. **Write your `fly.toml`.** Copy
+   [`fly.example.toml`](https://github.com/NiklasRosenstein/vaultwarden-fly-io/blob/main/fly.example.toml). Set the
+   app name, your domain, the admin hash from step 4, and the
+   [latest image version](https://github.com/NiklasRosenstein/vaultwarden-fly-io/pkgs/container/vaultwarden-fly-io).
+
+   ```toml title="fly.toml" {1,5,8-9}
+   app = "<app_name>"
+   primary_region = "fra"
+
+   [build]
+     image = "ghcr.io/niklasrosenstein/vaultwarden-fly-io:<version>"
+
+   [env]
+     VAULTWARDEN_DOMAIN = "https://vault.example.com"
+     VAULTWARDEN_ADMIN_TOKEN = "$argon2id$v=19$m=65540,t=3,p=4$..."
+   ```
+
+6. **Deploy.** `--ha=false` creates a single machine. This setup must never run more than one.
+
+   ```sh
+   fly deploy --ha=false
+   ```
+
+</Steps>
+
+Your vault is now at `https://<app_name>.fly.dev`. To use your own domain,
+[add a certificate](https://fly.io/docs/networking/custom-domain/).
+
+## Next steps
+
+- Once your accounts exist, stop new sign-ups: `VAULTWARDEN_SIGNUPS_ALLOWED = "false"`.
+- Set up [email](../../reference/settings/#email) for invitations and verification.
+- Turn on [backups](../../keep-your-data-safe/turn-on-backups/).

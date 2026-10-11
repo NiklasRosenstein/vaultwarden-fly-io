@@ -1,0 +1,57 @@
+---
+title: Restore from a backup
+description: Restore your vault from an encrypted backup archive.
+---
+
+import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
+
+You need two things, both stored **outside** the app: your recovery key (`recovery-key.txt`) and access to the backup
+bucket.
+
+<Steps>
+
+1. **Pick a backup.** Open a JSON file under `<prefix>/completed/`. Download the archive it names. Check that its size
+   and SHA-256 match the JSON file.
+
+2. **Decrypt and unpack it** into a private folder:
+
+   ```sh
+   umask 077
+   age -d -i recovery-key.txt -o backup.tar.gz backup.tar.age
+   mkdir recovered
+   tar -xzf backup.tar.gz -C recovered
+   ```
+
+3. **Look at the contents.**
+
+   <FileTree>
+   - recovered/vaultwarden/
+     - db.sqlite3 the database
+     - manifest.json what is in the archive, and `missing_files`
+     - files/
+       - attachments/
+       - sends/
+     - recovery/
+       - environment.json the app's settings, including keys and bucket credentials
+       - config.json Vaultwarden's settings at backup time
+       - rsa_key.pem the signing key
+   </FileTree>
+
+4. **Check for missing files.** If `missing_files` in `manifest.json` is not empty, those files are not in this
+   archive. Try to get them from an older archive.
+
+5. **Restore** with the steps from [Move from another server](../../get-started/move-from-another-server/):
+   - Use a **new** bucket.
+   - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=import-db.sqlite`.
+   - Upload `files/attachments/` and `files/sends/` to `data/` in the bucket.
+   - Use the same Vaultwarden version (see `manifest.json`), domain and RSA key.
+   - Set new bucket credentials. The old ones in `environment.json` may no longer work.
+
+6. **Test before you switch.** Log in and download an attachment. Only then send users to it and turn backups back
+   on. Make sure the old server is stopped.
+
+</Steps>
+
+<Aside>
+The archive does not contain the backup settings or the backup credentials.
+</Aside>

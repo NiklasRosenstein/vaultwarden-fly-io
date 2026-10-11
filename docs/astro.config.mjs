@@ -2,17 +2,35 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
+// Pull request previews are served from a subdirectory, see .github/workflows/docs.yaml.
+const base = (process.env.DOCS_BASE || '/vaultwarden-fly-io').replace(/\/$/, '');
+
+// Old page paths, so existing links keep working.
+const redirects = Object.fromEntries(
+	Object.entries({
+		'getting-started/introduction': 'get-started/what-this-is',
+		'getting-started/installation': 'get-started/install',
+		'guides/migration': 'get-started/move-from-another-server',
+		'guides/backups': 'keep-your-data-safe/turn-on-backups',
+		'guides/recovery': 'keep-your-data-safe/restore-from-a-backup',
+		'guides/kubernetes': 'other-setups/docker-and-kubernetes',
+		'guides/aws-oidc': 'other-setups/aws-s3-without-access-keys',
+		'reference/configuration': 'reference/settings',
+		'reference/architecture': 'reference/how-it-works',
+	}).map(([from, to]) => [`/${from}`, `${base}/${to}/`]),
+);
+
 export default defineConfig({
 	site: 'https://niklasrosenstein.github.io',
-	// Pull request previews are served from a subdirectory, see .github/workflows/docs.yaml.
-	base: process.env.DOCS_BASE || '/vaultwarden-fly-io',
+	base,
 	// GitHub Pages serves this site from a branch, where Jekyll would drop directories starting with "_".
 	build: { assets: 'assets' },
+	redirects,
 	integrations: [
 		starlight({
 			title: 'Vaultwarden on Fly.io',
 			description:
-				'Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted recovery backups.',
+				'Run your own Vaultwarden password manager on Fly.io for about 2 USD a month, with all data stored safely in S3.',
 			logo: { src: './src/assets/logo.svg' },
 			favicon: '/favicon.svg',
 			social: [
@@ -33,22 +51,24 @@ export default defineConfig({
 			],
 			sidebar: [
 				{
-					label: 'Getting started',
-					items: ['getting-started/introduction', 'getting-started/installation'],
-				},
-				{
-					label: 'Guides',
+					label: 'Get started',
 					items: [
-						'guides/migration',
-						'guides/backups',
-						'guides/recovery',
-						'guides/kubernetes',
-						'guides/aws-oidc',
+						'get-started/what-this-is',
+						'get-started/install',
+						'get-started/move-from-another-server',
 					],
 				},
 				{
+					label: 'Keep your data safe',
+					items: ['keep-your-data-safe/turn-on-backups', 'keep-your-data-safe/restore-from-a-backup'],
+				},
+				{
+					label: 'Other setups',
+					items: ['other-setups/docker-and-kubernetes', 'other-setups/aws-s3-without-access-keys'],
+				},
+				{
 					label: 'Reference',
-					items: ['reference/configuration', 'reference/architecture', 'reference/costs'],
+					items: ['reference/settings', 'reference/how-it-works', 'reference/costs'],
 				},
 				{ label: 'Development', link: '/development/' },
 			],

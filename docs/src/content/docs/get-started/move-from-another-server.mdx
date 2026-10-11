@@ -1,0 +1,58 @@
+---
+title: Move from another server
+description: Bring the database, key and attachments of an existing Vaultwarden server to Fly.io.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+You can move an existing Vaultwarden server to a new deployment. The examples use the
+[MinIO client](https://min.io/docs/minio/linux/reference/minio-mc.html) (`mc`), with an alias called `tigris` for your
+bucket. Any S3 tool works.
+
+<Steps>
+
+1. **Deploy the new server** with the [install guide](../install/).
+
+2. **Stop the old server**, so nothing changes while you copy. If you can't stop it and still reach its files, run
+   this SQL command on its database. It writes all pending changes into the database file:
+
+   ```sql
+   PRAGMA wal_checkpoint(TRUNCATE);
+   ```
+
+3. **Upload the database and import it.** With `IMPORT_DATABASE` set, the server loads this file on start.
+
+   ```sh
+   mc cp db.sqlite3 tigris/<bucket>/import-db.sqlite
+   fly deploy --env IMPORT_DATABASE=import-db.sqlite
+   ```
+
+4. **Check the logs** with `fly logs`. Look for the import and for Litestream finishing its upload. Then deploy again
+   **without** the variable:
+
+   ```sh
+   fly deploy
+   ```
+
+   <Aside type="caution">
+   Don't leave `IMPORT_DATABASE` set. Every restart would replace your live database with the old file.
+   </Aside>
+
+5. **Copy the RSA key**, so users stay logged in:
+
+   ```sh
+   fly secrets set VAULTWARDEN_RSA_PRIVATE_KEY="$(cat rsa_key.pem)"
+   ```
+
+6. **Copy attachments and Sends** to `data/` in the bucket. The icon cache is optional.
+
+   ```sh
+   mc cp --recursive attachments sends icon_cache tigris/<bucket>/data/
+   ```
+
+7. **Copy your settings.** Look at the old `config.json` and environment. Set the matching `VAULTWARDEN_*`
+   variables. See [Settings](../../reference/settings/).
+
+</Steps>
+
+To check the result, log in and download an attachment.
