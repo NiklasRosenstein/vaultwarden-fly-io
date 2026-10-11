@@ -134,7 +134,7 @@ See the [backups guide](../../guides/backups/) for how these fit together.
 | `BACKUP_AWS_ACCESS_KEY_ID` | required without a role | Destination access key. The source credentials are never used as a fallback. |
 | `BACKUP_AWS_SECRET_ACCESS_KEY` | required without a role | Destination secret key. |
 | `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for temporary destination credentials. You must refresh it yourself. |
-| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to assume with an OIDC token instead of using access keys (see [Authenticate with OIDC](../../guides/backups/#authenticate-with-oidc)). Can't be combined with the access keys above. The application's `AWS_ROLE_ARN` is never used. |
+| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to assume with an OIDC token instead of using access keys (see [AWS S3 without access keys](../../guides/aws-oidc/)). Can't be combined with the access keys above. The application's `AWS_ROLE_ARN` is never used. |
 | `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Fly.io machine API | File containing the OIDC token (JWT). It is read again on every refresh, so it may be rotated in place. On Fly.io, leave it unset to request tokens from the machine API instead. Required with a role elsewhere. The application's `AWS_WEB_IDENTITY_TOKEN_FILE` is never used. |
 | `BACKUP_AWS_ROLE_SESSION_NAME` | `vaultwarden-backup` | Role session name, visible in CloudTrail. |
 | `BACKUP_AWS_REGION` | required when enabled | Destination signing region. With a role, also the region of the STS endpoint. |
