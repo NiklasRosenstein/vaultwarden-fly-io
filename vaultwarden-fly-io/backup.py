@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -18,9 +19,10 @@ import uuid
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import closing
 from datetime import UTC, datetime
+from http.client import HTTPConnection
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple, cast
 from urllib.request import urlopen
 
 from pydantic import (
@@ -30,18 +32,24 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
+from settings import ConfigError, env, flag, positive_int, required
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
+    import boto3
+    from botocore.credentials import FileWebIdentityTokenLoader
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import ObjectTypeDef
 
 LOG = logging.getLogger("backup")
 SCHEMA_VERSION: Final = 1
 DATA_DIR = Path("/data")
+# Fly.io's machine API, which issues OIDC tokens for the machine.
+FLY_API_SOCKET = Path("/.fly/api")
 # Only image inputs needed for recovery belong in the encrypted environment export.
 RECOVERY_FIELDS = """
-AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION AWS_ENDPOINT_URL_S3
+AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_ROLE_ARN AWS_ROLE_SESSION_NAME
+AWS_REGION AWS_ENDPOINT_URL_S3
 BUCKET_NAME AGE_SECRET_KEY GEESEFS_ENABLED GEESEFS_MEMORY_LIMIT GEESEFS_MONITOR_ENABLED
 GEESEFS_MONITOR_INTERVAL GEESEFS_MONITOR_TIMEOUT GEESEFS_MONITOR_FAILURE_THRESHOLD GEESEFS_MONITOR_WRITE_CHECK
 LITESTREAM_ENABLED
@@ -63,6 +71,7 @@ VAULTWARDEN_YUBICO_CLIENT_ID VAULTWARDEN_YUBICO_SECRET_KEY
 RECOVERY_EXCLUSIONS = {
     "FLY_APP_NAME": "Recovery records the effective VAULTWARDEN_DOMAIN instead.",
     "FLY_MACHINE_ID": "Set by Fly.io for each machine.",
+    "AWS_WEB_IDENTITY_TOKEN_FILE": "Token files are provided by the recovery host.",
     "ENTRYPOINT_IDLE": "Would prevent the recovered application from starting.",
     "IMPORT_DATABASE": "One-time import must be chosen explicitly during recovery.",
     "BACKUP_ENABLED": "Enable backups explicitly after validating the recovered service.",
@@ -71,6 +80,9 @@ RECOVERY_EXCLUSIONS = {
     "BACKUP_AWS_ACCESS_KEY_ID": "Backup-destination credentials are not application recovery data.",
     "BACKUP_AWS_SECRET_ACCESS_KEY": "Backup-destination credentials are not application recovery data.",
     "BACKUP_AWS_SESSION_TOKEN": "Temporary backup credentials are not application recovery data.",
+    "BACKUP_AWS_ROLE_ARN": "Destination authentication is configured independently during recovery.",
+    "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE": "Token files are provided by the recovery host.",
+    "BACKUP_AWS_ROLE_SESSION_NAME": "Destination authentication is configured independently during recovery.",
     "BACKUP_AWS_REGION": "Destination is configured independently during recovery.",
     "BACKUP_AWS_ENDPOINT_URL_S3": "Destination is configured independently during recovery.",
     "BACKUP_AGE_RECIPIENT": "Recovery encryption is configured independently of the application.",
@@ -130,25 +142,8 @@ class PayloadManifestV1(CaptureRecordV1):
     missing_files: list[MissingFile]
 
 
-class BackupError(ValueError):
-    """A diagnostic written by this module that is safe to include in logs."""
-
-
-def positive_int(name: str, default: int) -> int:
-    try:
-        value = int(os.environ.get(name, str(default)))
-    except ValueError:
-        raise BackupError(f"{name} must be a positive integer") from None
-    if value <= 0:
-        raise BackupError(f"{name} must be positive")
-    return value
-
-
-def required(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise BackupError(f"{name} is required")
-    return value
+# A diagnostic that is safe to include in logs, like configuration errors.
+BackupError = ConfigError
 
 
 def utc(timestamp: float) -> str:
@@ -228,24 +223,116 @@ class Store:
             yield from page.get("Contents", [])
 
 
+class StaticCredentials(NamedTuple):
+    access_key: str
+    secret_key: str
+    session_token: str | None = None
+
+
+class WebIdentity(NamedTuple):
+    role_arn: str
+    # None requests each token from the Fly.io machine API instead of a file.
+    token_file: str | None
+    session_name: str
+
+
+class UnixHTTPConnection(HTTPConnection):
+    def __init__(self, path: str, timeout: float) -> None:
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self.socket_path)
+        self.sock = sock
+
+
+class FlyTokenLoader:
+    """Requests a fresh OIDC token for AWS STS from the Fly.io machine API."""
+
+    def __init__(self, socket_path: str) -> None:
+        self.socket_path = socket_path
+
+    def __call__(self) -> str:
+        connection = UnixHTTPConnection(self.socket_path, timeout=10)
+        try:
+            connection.request(
+                "POST",
+                "/v1/tokens/oidc",
+                body=json.dumps({"aud": "sts.amazonaws.com"}),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            token = response.read().decode().strip()
+        finally:
+            connection.close()
+        if response.status != 200 or not token:
+            raise BackupError(f"Fly.io OIDC token request failed ({response.status})")
+        return token
+
+
+def web_identity_session(identity: WebIdentity, region: str) -> boto3.Session:
+    """A session that only uses AssumeRoleWithWebIdentity, never ambient credentials."""
+    import boto3
+    import botocore.session
+    from botocore.credentials import (
+        AssumeRoleWithWebIdentityProvider,
+        CredentialResolver,
+    )
+
+    session = botocore.session.Session()
+    session.set_config_variable("region", region)
+    # The source's AWS_ENDPOINT_URL_* must not redirect STS either.
+    session.set_config_variable("ignore_configured_endpoint_urls", True)
+    # The token loader is called on every refresh, so rotated tokens are picked up.
+    if identity.token_file is None:
+        token_source, token_loader = str(FLY_API_SOCKET), FlyTokenLoader
+    else:
+        token_source, token_loader = identity.token_file, None
+    profile = {
+        "role_arn": identity.role_arn,
+        "web_identity_token_file": token_source,
+        "role_session_name": identity.session_name,
+    }
+    provider = AssumeRoleWithWebIdentityProvider(
+        load_config=lambda: {"profiles": {"backup": profile}},
+        client_creator=lambda service, **kwargs: session.create_client(
+            service, region_name=region, **kwargs
+        ),
+        profile_name="backup",
+        disable_env_vars=True,
+        # botocore only calls the loader; the stubs name the file-based class.
+        token_loader_cls=cast("type[FileWebIdentityTokenLoader] | None", token_loader),
+    )
+    session.register_component("credential_provider", CredentialResolver([provider]))
+    return boto3.Session(botocore_session=session)
+
+
 def s3_store(
     *,
     bucket: str,
     prefix: str,
-    access_key: str,
-    secret_key: str,
     region: str,
-    session_token: str | None = None,
+    credentials: StaticCredentials | WebIdentity | None,
     endpoint_url: str | None = None,
 ) -> Store:
+    """Without explicit credentials, boto3 resolves them from the standard AWS_* inputs."""
     import boto3
     from botocore.config import Config
 
-    client = boto3.client(
+    if credentials is None:
+        session = boto3.Session()
+    elif isinstance(credentials, WebIdentity):
+        session = web_identity_session(credentials, region)
+    else:
+        session = boto3.Session(
+            aws_access_key_id=credentials.access_key,
+            aws_secret_access_key=credentials.secret_key,
+            aws_session_token=credentials.session_token,
+        )
+    client = session.client(
         "s3",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        aws_session_token=session_token,
         region_name=region,
         endpoint_url=endpoint_url,
         config=Config(
@@ -449,16 +536,46 @@ def publish(store: Store, archive: Path, record: CaptureRecordV1) -> None:
     )
 
 
+def destination_credentials() -> StaticCredentials | WebIdentity:
+    """Destination credentials; the application's AWS_* are never used as a fallback."""
+    role_arn = env("BACKUP_AWS_ROLE_ARN")
+    token_file = env("BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE")
+    if not role_arn and not token_file:
+        return StaticCredentials(
+            access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
+            secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
+            session_token=env("BACKUP_AWS_SESSION_TOKEN") or None,
+        )
+    # Unlike the AWS SDKs, which prefer static keys, refuse ambiguous configuration.
+    conflict = (
+        "BACKUP_AWS_ROLE_ARN" if role_arn else "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"
+    )
+    for name in (
+        "BACKUP_AWS_ACCESS_KEY_ID",
+        "BACKUP_AWS_SECRET_ACCESS_KEY",
+        "BACKUP_AWS_SESSION_TOKEN",
+    ):
+        if env(name):
+            raise BackupError(f"{name} cannot be combined with {conflict}")
+    if not token_file and not FLY_API_SOCKET.is_socket():
+        raise BackupError(
+            "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE is required outside Fly.io"
+        )
+    return WebIdentity(
+        role_arn=required("BACKUP_AWS_ROLE_ARN"),
+        token_file=token_file or None,
+        session_name=env("BACKUP_AWS_ROLE_SESSION_NAME", "vaultwarden-backup"),
+    )
+
+
 def main(work: Path) -> float:
     """Capture the Vaultwarden recovery payload and return the next scheduled time."""
     destination = s3_store(
         bucket=required("BACKUP_BUCKET_NAME"),
         prefix=required("BACKUP_PREFIX"),
-        access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
-        secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
         region=required("BACKUP_AWS_REGION"),
-        session_token=os.environ.get("BACKUP_AWS_SESSION_TOKEN"),
-        endpoint_url=os.environ.get("BACKUP_AWS_ENDPOINT_URL_S3"),
+        credentials=destination_credentials(),
+        endpoint_url=env("BACKUP_AWS_ENDPOINT_URL_S3") or None,
     )
     interval = positive_int("BACKUP_INTERVAL_SECONDS", 3600)
     now = time.time()
@@ -467,11 +584,11 @@ def main(work: Path) -> float:
         return previous + interval
     # Restore and application migrations must finish before opening SQLite.
     with urlopen(
-        f"http://127.0.0.1:{os.environ.get('ROCKET_PORT', '8080')}/alive", timeout=5
+        f"http://127.0.0.1:{env('ROCKET_PORT', '8080')}/alive", timeout=5
     ) as response:
         if response.status != 200:
             raise BackupError("Vaultwarden is not ready")
-    if os.environ.get("GEESEFS_ENABLED", "true") != "true":
+    if not flag("GEESEFS_ENABLED", True):
         raise BackupError("scheduled backup requires S3-backed attachments and sends")
     maximum = positive_int("BACKUP_MAX_BYTES", 1024**3)
     if maximum > 4 * 1024**3:
@@ -519,11 +636,10 @@ def main(work: Path) -> float:
     source_store = s3_store(
         bucket=required("BUCKET_NAME"),
         prefix="data",
-        access_key=required("AWS_ACCESS_KEY_ID"),
-        secret_key=required("AWS_SECRET_ACCESS_KEY"),
         region=required("AWS_REGION"),
-        session_token=os.environ.get("AWS_SESSION_TOKEN"),
-        endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3"),
+        # Static keys or web identity, resolved like GeeseFS and Litestream do.
+        credentials=None,
+        endpoint_url=env("AWS_ENDPOINT_URL_S3") or None,
     )
     capture_files(
         source_store,
@@ -672,7 +788,7 @@ def supervise(command: Sequence[str]) -> int:
                     deadline = now + positive_int("BACKUP_TIMEOUT_SECONDS", 1800)
                     staging = tempfile.TemporaryDirectory(
                         prefix="vaultwarden-backup-",
-                        dir=os.environ.get("BACKUP_TMP_DIR"),
+                        dir=env("BACKUP_TMP_DIR") or None,
                     )
                     capture = subprocess.Popen(
                         [sys.executable, __file__, "once", staging.name],
@@ -710,6 +826,8 @@ def cli() -> int:
         level=logging.INFO,
         format="%(asctime)s level=%(levelname)s component=backup %(message)s",
     )
+    # Its refresh warnings include SDK error messages, which can contain account data.
+    logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
     if sys.argv[1] == "supervise":
         return supervise(sys.argv[2:])
     if sys.argv[1] == "once":

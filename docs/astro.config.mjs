@@ -38,7 +38,13 @@ export default defineConfig({
 				},
 				{
 					label: 'Guides',
-					items: ['guides/migration', 'guides/backups', 'guides/recovery', 'guides/kubernetes'],
+					items: [
+						'guides/migration',
+						'guides/backups',
+						'guides/recovery',
+						'guides/kubernetes',
+						'guides/aws-oidc',
+					],
 				},
 				{
 					label: 'Reference',

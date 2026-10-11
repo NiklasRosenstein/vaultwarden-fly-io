@@ -15,14 +15,18 @@ the admin panel don't persist. Change the variables instead.
 
 ## S3 storage
 
-`fly storage create` sets these as secrets for you.
+`fly storage create` sets these as secrets for you. With an AWS S3 bucket, you can use an IAM role instead of access
+keys, see [AWS S3 without access keys](../../guides/aws-oidc/).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AWS_ACCESS_KEY_ID` | required | Access key for the application bucket. |
-| `AWS_SECRET_ACCESS_KEY` | required | Secret key for the application bucket. |
+| `AWS_ACCESS_KEY_ID` | required without a role | Access key for the application bucket. Takes precedence over `AWS_ROLE_ARN`. |
+| `AWS_SECRET_ACCESS_KEY` | required without a role | Secret key for the application bucket. |
+| `AWS_ROLE_ARN` | unset | IAM role to assume with the OIDC token in `AWS_WEB_IDENTITY_TOKEN_FILE`. AWS S3 only. |
+| `AWS_WEB_IDENTITY_TOKEN_FILE` | set by Fly.io and EKS | File containing the OIDC token for `AWS_ROLE_ARN`. The entrypoint waits up to 30 seconds for it to appear. |
+| `AWS_ROLE_SESSION_NAME` | set by Fly.io | Role session name, visible in CloudTrail. |
 | `AWS_REGION` | required | Signing region of the bucket. |
-| `AWS_ENDPOINT_URL_S3` | required | S3 endpoint URL. |
+| `AWS_ENDPOINT_URL_S3` | AWS S3 in `AWS_REGION` | S3 endpoint URL. Required for any provider other than AWS. |
 | `BUCKET_NAME` | required | Bucket holding the Litestream replica (`vaultwarden.db/`) and files (`data/`). |
 
 ## Vaultwarden
@@ -34,7 +38,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `VAULTWARDEN_ADMIN_TOKEN` | required | Admin panel token. Hash it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Because it's hashed, it can be a plain environment variable. |
+| `VAULTWARDEN_ADMIN_TOKEN` | required | Admin panel token. Hash it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Because it's hashed, it can be a plain environment variable. Set it to an empty value to disable the admin panel. |
 | `VAULTWARDEN_RSA_PRIVATE_KEY` | required | 2048-bit RSA private key used to sign JWTs. Generate it with `openssl genrsa 2048`. Changing it invalidates all current sessions. |
 | `VAULTWARDEN_DOMAIN` | `https://${FLY_APP_NAME}.fly.dev` | Public URL of your deployment. |
 | `VAULTWARDEN_LOG_LEVEL` | `info` | Log verbosity. |
@@ -95,7 +99,7 @@ the same name, without the `VAULTWARDEN_` prefix.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `AGE_SECRET_KEY` | required | age identity that encrypts the replica. Keep a copy outside Fly.io. |
-| `LITESTREAM_ENABLED` | `true` | Restore and replicate the database with Litestream. If you turn this off, the database is lost on every restart. |
+| `LITESTREAM_ENABLED` | `true` | Restore and replicate the database with Litestream. If you turn this off, the database is lost on every restart. Older images ignored this option and always used Litestream, so check that it is not set before upgrading. |
 | `LITESTREAM_SYNC_INTERVAL` | `10s` | How often changes are pushed to the replica. Litestream's own default is `1s`. This image uses `10s` to cap the number of S3 requests, see the [cost model](../costs/#litestream-sync-interval). Lower it to shrink the window of changes lost on a crash. |
 | `LITESTREAM_RETENTION` | `24h` | How long snapshots and WAL segments are kept. |
 | `LITESTREAM_RETENTION_CHECK_INTERVAL` | `1h` | How often retention is enforced. |
@@ -127,10 +131,13 @@ See the [backups guide](../../guides/backups/) for how these fit together.
 | `BACKUP_ENABLED` | `false` | Run the backup worker. Requires GeeseFS. |
 | `BACKUP_BUCKET_NAME` | required when enabled | Destination bucket, separate from `BUCKET_NAME`. |
 | `BACKUP_PREFIX` | required when enabled | Application-specific key prefix, for example `vaultwarden/`. |
-| `BACKUP_AWS_ACCESS_KEY_ID` | required when enabled | Destination access key. The source credentials are never used as a fallback. |
-| `BACKUP_AWS_SECRET_ACCESS_KEY` | required when enabled | Destination secret key. |
+| `BACKUP_AWS_ACCESS_KEY_ID` | required without a role | Destination access key. The source credentials are never used as a fallback. |
+| `BACKUP_AWS_SECRET_ACCESS_KEY` | required without a role | Destination secret key. |
 | `BACKUP_AWS_SESSION_TOKEN` | unset | Session token for temporary destination credentials. You must refresh it yourself. |
-| `BACKUP_AWS_REGION` | required when enabled | Destination signing region. |
+| `BACKUP_AWS_ROLE_ARN` | unset | IAM role to assume with an OIDC token instead of using access keys (see [AWS S3 without access keys](../../guides/aws-oidc/)). Can't be combined with the access keys above. The application's `AWS_ROLE_ARN` is never used. |
+| `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Fly.io machine API | File containing the OIDC token (JWT). It is read again on every refresh, so it may be rotated in place. On Fly.io, leave it unset to request tokens from the machine API instead. Required with a role elsewhere. The application's `AWS_WEB_IDENTITY_TOKEN_FILE` is never used. |
+| `BACKUP_AWS_ROLE_SESSION_NAME` | `vaultwarden-backup` | Role session name, visible in CloudTrail. |
+| `BACKUP_AWS_REGION` | required when enabled | Destination signing region. With a role, also the region of the STS endpoint. |
 | `BACKUP_AWS_ENDPOINT_URL_S3` | AWS regional endpoint | Endpoint of an S3-compatible destination that supports conditional PUT and SHA-256 checksums. |
 | `BACKUP_AGE_RECIPIENT` | required when enabled | Public key for recovery. Keep the private key outside this deployment, separate from `AGE_SECRET_KEY`. |
 | `BACKUP_INTERVAL_SECONDS` | `3600` | Time between capture start times, including degraded backups. The schedule survives restarts through the completion manifests in S3. |
