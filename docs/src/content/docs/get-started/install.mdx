@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Deploy Vaultwarden to Fly.io in seven steps.
+description: Deploy Vaultwarden to Fly.io in six steps.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -62,16 +62,10 @@ import { Steps, Aside } from '@astrojs/starlight/components';
      VAULTWARDEN_ADMIN_TOKEN = "$argon2id$v=19$m=65540,t=3,p=4$..."
    ```
 
-6. **Deploy.**
+6. **Deploy.** `--ha=false` creates a single machine. This setup must never run more than one.
 
    ```sh
-   fly deploy
-   ```
-
-7. **Keep only one machine.** The first deploy creates two.
-
-   ```sh
-   fly scale count 1
+   fly deploy --ha=false
    ```
 
 </Steps>

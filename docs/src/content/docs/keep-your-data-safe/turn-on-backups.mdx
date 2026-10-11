@@ -3,6 +3,8 @@ title: Turn on backups
 description: Keep an extra encrypted copy of your vault in a second bucket.
 ---
 
+import { Steps, Aside } from '@astrojs/starlight/components';
+
 Litestream already copies your database to S3. But that copy sits in the same bucket, with the same credentials, as
 the app. If the app or its credentials are compromised, that copy can be lost too.
 
@@ -12,7 +14,9 @@ The app never deletes anything there.
 
 To restore an archive, see [Restore from a backup](../restore-from-a-backup/).
 
-## Set it up
+## Steps
+
+<Steps>
 
 1. **Create a recovery key** on your own computer. Don't reuse `AGE_SECRET_KEY`.
 
@@ -20,14 +24,15 @@ To restore an archive, see [Restore from a backup](../restore-from-a-backup/).
    age-keygen -o recovery-key.txt
    ```
 
-   :::danger
+   <Aside type="danger">
    Keep `recovery-key.txt` offline and safe. Without it, nobody can open the backups. The app only gets the public
    part, which starts with `age1`.
-   :::
+   </Aside>
 
 2. **Create a second bucket**, and credentials that can only read and write in it. See [Permissions](#permissions).
 
-3. **Set the backup options** on the app:
+3. **Set the backup options** on the app. All options are in [Settings](../../reference/settings/#scheduled-backups).
+   To use an IAM role instead of keys, see [AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/).
 
    ```sh
    fly secrets set \
@@ -40,13 +45,23 @@ To restore an archive, see [Restore from a backup](../restore-from-a-backup/).
      BACKUP_AGE_RECIPIENT=age1...
    ```
 
-   All options are in [Settings](../../reference/settings/#scheduled-backups). For AWS S3 without access keys,
-   see [AWS S3 without access keys](../../other-setups/aws-s3-without-access-keys/).
+4. **Keep the machine running.** A stopped machine can't make backups. In `fly.toml`, change `min_machines_running` to `1`, then deploy:
 
-:::caution[Keep the machine running]
-A stopped machine can't make backups. Set `min_machines_running = 1` in `fly.toml`, or turn off
-`auto_stop_machines`.
-:::
+   ```toml title="fly.toml"
+   [http_service]
+     min_machines_running = 1
+   ```
+
+5. **Set up alerts.** The app doesn't alert you, so check from outside:
+   - **Is the last backup recent?** Each backup writes a small JSON file to `<prefix>/completed/`. Alert when the
+     newest `captured_at` is too old.
+   - **Is the last backup complete?** If some attachments were missing, the backup is still written, with
+     `status: degraded`. The database is safe, but some files are not in it. Alert on this separately.
+
+6. **Test a restore.** Follow [Restore from a backup](../restore-from-a-backup/) with a test bucket. Repeat this from
+   time to time.
+
+</Steps>
 
 ## Permissions
 
@@ -55,17 +70,7 @@ The backup credentials need:
 - **List** on `<prefix>/completed/` and `<prefix>/archives/*`
 - **Read** and **write** under both prefixes
 
-They don't need delete. The bucket must support conditional uploads (`If-None-Match`) and SHA-256 checksums. Set up versioning and an expiry rule on the bucket yourself, so old archives are removed after
-a time you choose.
+They don't need delete. The bucket must support conditional uploads (`If-None-Match`) and SHA-256 checksums. Set up
+versioning and an expiry rule on the bucket yourself, so old archives are removed after a time you choose.
 
-## Check that it works
-
-The app doesn't alert you. Set up checks outside the app:
-
-- **Is the last backup recent?** Each backup writes a small JSON file to `<prefix>/completed/`. Alert when the newest
-  `captured_at` is too old.
-- **Is the last backup complete?** If some attachments were missing, the backup is still written, with
-  `status: degraded`. The database is safe, but some files are not in it. Alert on this separately.
-- **Can you restore it?** Try a [restore](../restore-from-a-backup/) in a test bucket from time to time.
-
-[How it works](../../reference/how-it-works/#backups) explains the archive format, the schedule and the limits.
+[How it works](../../reference/how-it-works/#backups) explains what a backup does.

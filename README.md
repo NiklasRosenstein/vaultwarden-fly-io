@@ -24,7 +24,7 @@ fly secrets set --app <app_name> \
   VAULTWARDEN_RSA_PRIVATE_KEY="$(openssl genrsa 2048)" \
   AGE_SECRET_KEY="$(age-keygen | tail -n1)"
 cp fly.example.toml fly.toml   # set app, domain and admin token
-fly deploy && fly scale count 1
+fly deploy --ha=false
 ```
 
 See the [install guide](https://niklasrosenstein.github.io/vaultwarden-fly-io/get-started/install/)
