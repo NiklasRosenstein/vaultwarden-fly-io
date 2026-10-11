@@ -13,7 +13,7 @@ package = false
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["vaultwarden-fly-io/backup.py", "tests"]
+files = ["vaultwarden-fly-io/backup.py", "vaultwarden-fly-io/entrypoint.py", "tests"]
 mypy_path = "vaultwarden-fly-io"
 
 [tool.ruff]

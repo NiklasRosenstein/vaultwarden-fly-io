@@ -33,7 +33,8 @@ Vaultwarden encrypts attachments and Sends itself, so the objects are stored wit
 
 ## Startup sequence
 
-1. Mount the bucket at `/mnt/s3` with GeeseFS (if `GEESEFS_ENABLED`).
+1. Wait for the OIDC token file, if `AWS_WEB_IDENTITY_TOKEN_FILE` is set, then mount the bucket at `/mnt/s3` with
+   GeeseFS (if `GEESEFS_ENABLED`).
 2. Write the RSA key pair from `VAULTWARDEN_RSA_PRIVATE_KEY`.
 3. Generate `config.json` from `VAULTWARDEN_*` variables and check that it is valid JSON.
 4. Idle here if `ENTRYPOINT_IDLE=true`.
@@ -58,7 +59,7 @@ After 60 seconds it sends `SIGKILL`, and the container exits with status `1`. Fl
 according to its restart policy (`on-failure` by default), which mounts the bucket again.
 
 :::note[S3 outages don't trigger restarts]
-Before restarting, the monitor checks with `mc` that the bucket itself is reachable. If it isn't, for example during
+Before restarting, the monitor checks with a direct S3 request that the bucket itself is reachable. If it isn't, for example during
 an outage of the S3 provider, the machine is **not** restarted. The disk doesn't survive a restart, so Litestream
 could neither upload its pending changes nor restore the database. Vaultwarden keeps serving from the local database,
 and the restart happens once S3 is reachable again, if the mount is still broken by then.

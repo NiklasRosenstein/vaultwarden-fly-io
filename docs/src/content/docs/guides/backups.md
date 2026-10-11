@@ -44,6 +44,13 @@ Vaultwarden keeps serving requests during the capture. To restore an archive, se
 
    All options are listed in the [configuration reference](../../reference/configuration/#scheduled-backups).
 
+## Authenticate with OIDC
+
+Instead of access keys, the worker can use an IAM role with temporary credentials from an OIDC token. Follow
+[AWS S3 without access keys](../aws-oidc/) with the `BACKUP_`-prefixed variables (`BACKUP_AWS_ROLE_ARN`,
+`BACKUP_AWS_REGION`, and `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` outside Fly.io), and grant the role the
+[destination permissions](#permissions).
+
 :::caution[Keep the machine running]
 A stopped Fly Machine can't run backups. To meet the interval, set `min_machines_running = 1` or turn off
 `auto_stop_machines`.
@@ -136,7 +143,8 @@ The image doesn't include a monitor or a retention controller. Set them up outsi
 **Source credentials** (the app's `AWS_*`): ListBucket on `data/attachments/` and `data/sends/`, and GetObject
 under those prefixes.
 
-**Destination credentials** (`BACKUP_AWS_*`; the source credentials are never used for the destination):
+**Destination credentials** (`BACKUP_AWS_*` access keys or the `BACKUP_AWS_ROLE_ARN` role; the source credentials are
+never used for the destination):
 
 - ListBucket scoped to `<prefix>/completed/` and `<prefix>/archives/`. Listing must also allow exact archive keys as
   prefixes, for example `<prefix>/archives/*`.

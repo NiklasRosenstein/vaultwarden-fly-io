@@ -13,12 +13,16 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import unittest
 from collections.abc import Iterator
 from contextlib import closing
+from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, BinaryIO, Self, TypedDict, cast
+from socketserver import UnixStreamServer
+from typing import IO, TYPE_CHECKING, Any, BinaryIO, Self, TypedDict, cast
 from unittest.mock import Mock, patch
 
 if TYPE_CHECKING:
@@ -205,7 +209,7 @@ class BackupTests(unittest.TestCase):
         self.destination = backup.Store(
             cast("S3Client", self.destination_client),
             "backups",
-            "kalix.cluster.rosenstein.app/vaultwarden",
+            "example.com/vaultwarden",
         )
         self.env = patch.dict(
             os.environ,
@@ -220,7 +224,7 @@ class BackupTests(unittest.TestCase):
                 "BACKUP_AWS_SESSION_TOKEN": "destination-session",
                 "BACKUP_AWS_REGION": "eu-west-1",
                 "BACKUP_BUCKET_NAME": "backups",
-                "BACKUP_PREFIX": "kalix.cluster.rosenstein.app/vaultwarden",
+                "BACKUP_PREFIX": "example.com/vaultwarden",
                 "BUCKET_NAME": "source",
                 "AWS_ACCESS_KEY_ID": "source-key",
                 "AWS_SECRET_ACCESS_KEY": "source-secret",
@@ -521,11 +525,11 @@ class BackupTests(unittest.TestCase):
             destination,
             {
                 "bucket": "backups",
-                "prefix": "kalix.cluster.rosenstein.app/vaultwarden",
-                "access_key": "destination-key",
-                "secret_key": "destination-secret",
-                "session_token": "destination-session",
+                "prefix": "example.com/vaultwarden",
                 "region": "eu-west-1",
+                "credentials": backup.StaticCredentials(
+                    "destination-key", "destination-secret", "destination-session"
+                ),
                 "endpoint_url": None,
             },
         )
@@ -534,48 +538,224 @@ class BackupTests(unittest.TestCase):
             {
                 "bucket": "source",
                 "prefix": "data",
-                "access_key": "source-key",
-                "secret_key": "source-secret",
-                "session_token": "source-session",
                 "region": "eu-central-1",
+                "credentials": None,
                 "endpoint_url": "https://source.invalid",
             },
         )
 
+    def test_web_identity_destination_credentials(self) -> None:
+        for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
+            del os.environ[f"BACKUP_AWS_{name}"]
+        os.environ.update(
+            BACKUP_AWS_ROLE_ARN="arn:aws:iam::123456789012:role/backup",
+            BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE="/var/run/secrets/aws/token",
+        )
+        self.run_capture()
+        destination, source = self.store_configs
+        self.assertEqual(
+            destination["credentials"],
+            backup.WebIdentity(
+                "arn:aws:iam::123456789012:role/backup",
+                "/var/run/secrets/aws/token",
+                "vaultwarden-backup",
+            ),
+        )
+        self.assertIsNone(source["credentials"])
+
+    def test_web_identity_rejects_static_credentials_and_partial_settings(
+        self,
+    ) -> None:
+        os.environ["BACKUP_AWS_ROLE_ARN"] = "arn:aws:iam::123456789012:role/backup"
+        with self.assertRaisesRegex(backup.BackupError, "BACKUP_AWS_ACCESS_KEY_ID"):
+            backup.destination_credentials()
+        for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
+            del os.environ[f"BACKUP_AWS_{name}"]
+        with self.assertRaisesRegex(
+            backup.BackupError, "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"
+        ):
+            backup.destination_credentials()
+        del os.environ["BACKUP_AWS_ROLE_ARN"]
+        os.environ["BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"] = "/var/run/secrets/aws/token"
+        with self.assertRaisesRegex(backup.BackupError, "BACKUP_AWS_ROLE_ARN"):
+            backup.destination_credentials()
+
+    def test_source_uses_standard_credential_chain(self) -> None:
+        store = backup.s3_store(
+            bucket="source",
+            prefix="data",
+            region="eu-central-1",
+            credentials=None,
+            endpoint_url="https://source.invalid",
+        )
+        credentials = cast(Any, store.client)._request_signer._credentials
+        self.assertEqual(credentials.method, "env")
+        self.assertEqual(
+            tuple(credentials.get_frozen_credentials()),
+            ("source-key", "source-secret", "source-session", None),
+        )
+
     def test_s3_factory_forwards_only_explicit_credentials(self) -> None:
         # Ambient source credentials in setUp must not replace destination inputs.
-        with patch("boto3.client") as client:
-            backup.s3_store(
+        for token in (None, "destination-token"):
+            store = backup.s3_store(
                 bucket="backups",
                 prefix="vaultwarden",
-                access_key="destination",
-                secret_key="secret",
                 region="eu-west-1",
+                credentials=backup.StaticCredentials("destination", "secret", token),
             )
-        arguments = client.call_args.kwargs
-        self.assertEqual(arguments["aws_access_key_id"], "destination")
-        self.assertEqual(arguments["aws_secret_access_key"], "secret")
-        self.assertIsNone(arguments["aws_session_token"])
-        with patch("boto3.client") as client:
-            backup.s3_store(
-                bucket="backups",
-                prefix="vaultwarden",
-                access_key="destination",
-                secret_key="secret",
-                region="eu-west-1",
-                session_token="destination-token",
+            credentials = cast(Any, store.client)._request_signer._credentials
+            self.assertEqual(
+                tuple(credentials.get_frozen_credentials()),
+                ("destination", "secret", token, None),
+            )
+
+    def test_web_identity_uses_only_configured_role_and_token(self) -> None:
+        token = self.root / "token"
+        token.write_text("jwt-1")
+        # Ambient web identity, endpoint and static settings belong to other clients.
+        os.environ.update(
+            AWS_ROLE_ARN="arn:aws:iam::123456789012:role/ambient",
+            AWS_WEB_IDENTITY_TOKEN_FILE="/nonexistent",
+            AWS_ENDPOINT_URL_STS="https://sts.invalid",
+        )
+        calls: list[tuple[str | None, dict[str, object]]] = []
+
+        def api_call(
+            client: object, operation: str, params: dict[str, object]
+        ) -> dict[str, object]:
+            self.assertEqual(operation, "AssumeRoleWithWebIdentity")
+            calls.append((cast(Any, client).meta.endpoint_url, params))
+            return {
+                "Credentials": {
+                    "AccessKeyId": f"temporary-{len(calls)}",
+                    "SecretAccessKey": "temporary-secret",
+                    "SessionToken": "temporary-session",
+                    # Inside botocore's advisory window: every access refreshes.
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=12),
+                },
+                "AssumedRoleUser": {
+                    "Arn": "arn:aws:sts::123456789012:assumed-role/backup/x"
+                },
+            }
+
+        store = backup.s3_store(
+            bucket="backups",
+            prefix="vaultwarden",
+            region="eu-west-1",
+            credentials=backup.WebIdentity(
+                "arn:aws:iam::123456789012:role/backup", str(token), "session"
+            ),
+        )
+        credentials = cast(Any, store.client)._request_signer._credentials
+        self.assertEqual(credentials.method, "assume-role-with-web-identity")
+        with patch("botocore.client.BaseClient._make_api_call", api_call):
+            frozen = credentials.get_frozen_credentials()
+            self.assertEqual(frozen.access_key, "temporary-1")
+            # Rotated tokens are read again when the credentials are refreshed.
+            token.write_text("jwt-2")
+            self.assertEqual(
+                credentials.get_frozen_credentials().access_key, "temporary-2"
             )
         self.assertEqual(
-            client.call_args.kwargs["aws_session_token"], "destination-token"
+            calls,
+            [
+                (
+                    "https://sts.eu-west-1.amazonaws.com",
+                    {
+                        "RoleArn": "arn:aws:iam::123456789012:role/backup",
+                        "RoleSessionName": "session",
+                        "WebIdentityToken": jwt,
+                    },
+                )
+                for jwt in ("jwt-1", "jwt-2")
+            ],
         )
+        self.assertEqual(
+            store.client.meta.endpoint_url, "https://s3.eu-west-1.amazonaws.com"
+        )
+
+    def fly_api(self, status: int = 200) -> list[tuple[str, str, object]]:
+        """Serves OIDC tokens like the Fly.io machine API and records the requests."""
+        requests: list[tuple[str, str, object]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                requests.append((self.command, self.path, json.loads(body)))
+                self.send_response(status)
+                self.end_headers()
+                self.wfile.write(f"fly-jwt-{len(requests)}\n".encode())
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        path = self.root / "fly-api.sock"
+        server = UnixStreamServer(str(path), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        patcher = patch.object(backup, "FLY_API_SOCKET", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return requests
+
+    def test_web_identity_requests_tokens_from_fly_api(self) -> None:
+        requests = self.fly_api()
+        for name in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
+            del os.environ[f"BACKUP_AWS_{name}"]
+        os.environ["BACKUP_AWS_ROLE_ARN"] = "arn:aws:iam::123456789012:role/backup"
+        identity = backup.destination_credentials()
+        self.assertEqual(
+            identity,
+            backup.WebIdentity(
+                "arn:aws:iam::123456789012:role/backup", None, "vaultwarden-backup"
+            ),
+        )
+        tokens: list[object] = []
+
+        def api_call(
+            client: object, operation: str, params: dict[str, object]
+        ) -> dict[str, object]:
+            tokens.append(params["WebIdentityToken"])
+            return {
+                "Credentials": {
+                    "AccessKeyId": "temporary",
+                    "SecretAccessKey": "temporary-secret",
+                    "SessionToken": "temporary-session",
+                    # Inside botocore's advisory window: every access refreshes.
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=12),
+                },
+            }
+
+        store = backup.s3_store(
+            bucket="backups",
+            prefix="vaultwarden",
+            region="eu-west-1",
+            credentials=identity,
+        )
+        credentials = cast(Any, store.client)._request_signer._credentials
+        with patch("botocore.client.BaseClient._make_api_call", api_call):
+            credentials.get_frozen_credentials()
+            credentials.get_frozen_credentials()
+        # Each refresh requests a fresh token for the AWS STS audience.
+        self.assertEqual(tokens, ["fly-jwt-1", "fly-jwt-2"])
+        self.assertEqual(
+            requests, [("POST", "/v1/tokens/oidc", {"aud": "sts.amazonaws.com"})] * 2
+        )
+
+    def test_fly_api_errors_are_reported(self) -> None:
+        self.fly_api(status=500)
+        loader = backup.FlyTokenLoader(str(backup.FLY_API_SOCKET))
+        with self.assertRaisesRegex(backup.BackupError, "500"):
+            loader()
 
     def test_destination_does_not_inherit_source_endpoint(self) -> None:
         store = backup.s3_store(
             bucket="backups",
             prefix="vaultwarden",
-            access_key="destination",
-            secret_key="secret",
             region="eu-west-1",
+            credentials=backup.StaticCredentials("destination", "secret"),
         )
         self.assertEqual(
             store.client.meta.endpoint_url, "https://s3.eu-west-1.amazonaws.com"
@@ -934,16 +1114,16 @@ class ConfigurationCoverageTests(unittest.TestCase):
                 )
 
     def test_entrypoint_recovery_inputs_are_classified(self) -> None:
-        entrypoint = (MODULE.parent / "entrypoint.sh").read_text()
-        options = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)", entrypoint))
-        options.update(re.findall(r"assert_is_set\s+([A-Z][A-Z0-9_]*)", entrypoint))
-        # The entrypoint owns these paths rather than accepting them as inputs.
-        options -= {
-            "VAULTWARDEN_CONFIG_PATH",
-            "LITESTREAM_DATABASE_PATH",
-            "S3_MONITOR_FAILED_MARKER",
-            "S3_MONITOR_MC_CONFIG_DIR",
-        }
+        entrypoint = (MODULE.parent / "entrypoint.py").read_text()
+        # Every environment input goes through one of these helpers.
+        options = set(
+            re.findall(
+                r'\b(?:env|required|flag|integer|positive_int)\(\s*"([A-Z][A-Z0-9_]*)"',
+                entrypoint,
+            )
+        )
+        self.assertIn("VAULTWARDEN_ADMIN_TOKEN", options)
+        self.assertEqual(entrypoint.count("os.environ.get("), 1, "Only in env()")
         self.assertEqual(
             options - set(backup.RECOVERY_FIELDS) - set(backup.RECOVERY_EXCLUSIONS),
             set(),
