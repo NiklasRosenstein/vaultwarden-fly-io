@@ -20,7 +20,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple, cast
 from urllib.request import urlopen
 
 from pydantic import (
@@ -33,6 +33,7 @@ from pydantic import (
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
+    import boto3
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import ObjectTypeDef
 
@@ -71,6 +72,10 @@ RECOVERY_EXCLUSIONS = {
     "BACKUP_AWS_ACCESS_KEY_ID": "Backup-destination credentials are not application recovery data.",
     "BACKUP_AWS_SECRET_ACCESS_KEY": "Backup-destination credentials are not application recovery data.",
     "BACKUP_AWS_SESSION_TOKEN": "Temporary backup credentials are not application recovery data.",
+    "BACKUP_AUTH_MODE": "Destination authentication is configured independently during recovery.",
+    "BACKUP_AWS_ROLE_ARN": "Destination authentication is configured independently during recovery.",
+    "BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE": "Token files are provided by the recovery host.",
+    "BACKUP_AWS_ROLE_SESSION_NAME": "Destination authentication is configured independently during recovery.",
     "BACKUP_AWS_REGION": "Destination is configured independently during recovery.",
     "BACKUP_AWS_ENDPOINT_URL_S3": "Destination is configured independently during recovery.",
     "BACKUP_AGE_RECIPIENT": "Recovery encryption is configured independently of the application.",
@@ -228,24 +233,70 @@ class Store:
             yield from page.get("Contents", [])
 
 
+class StaticCredentials(NamedTuple):
+    access_key: str
+    secret_key: str
+    session_token: str | None = None
+
+
+class WebIdentity(NamedTuple):
+    role_arn: str
+    token_file: str
+    session_name: str
+
+
+def web_identity_session(identity: WebIdentity, region: str) -> boto3.Session:
+    """A session that only uses AssumeRoleWithWebIdentity, never ambient credentials."""
+    import boto3
+    import botocore.session
+    from botocore.credentials import (
+        AssumeRoleWithWebIdentityProvider,
+        CredentialResolver,
+    )
+
+    session = botocore.session.Session()
+    session.set_config_variable("region", region)
+    # The source's AWS_ENDPOINT_URL_* must not redirect STS either.
+    session.set_config_variable("ignore_configured_endpoint_urls", True)
+    profile = {
+        "role_arn": identity.role_arn,
+        "web_identity_token_file": identity.token_file,
+        "role_session_name": identity.session_name,
+    }
+    # The token file is re-read on every refresh, so rotated tokens are picked up.
+    provider = AssumeRoleWithWebIdentityProvider(
+        load_config=lambda: {"profiles": {"backup": profile}},
+        client_creator=lambda service, **kwargs: session.create_client(
+            service, region_name=region, **kwargs
+        ),
+        profile_name="backup",
+        disable_env_vars=True,
+    )
+    session.register_component("credential_provider", CredentialResolver([provider]))
+    return boto3.Session(botocore_session=session)
+
+
 def s3_store(
     *,
     bucket: str,
     prefix: str,
-    access_key: str,
-    secret_key: str,
     region: str,
-    session_token: str | None = None,
+    credentials: StaticCredentials | WebIdentity,
     endpoint_url: str | None = None,
 ) -> Store:
     import boto3
     from botocore.config import Config
 
-    client = boto3.client(
+    if isinstance(credentials, WebIdentity):
+        session = web_identity_session(credentials, region)
+    else:
+        session = boto3.Session(
+            aws_access_key_id=credentials.access_key,
+            aws_secret_access_key=credentials.secret_key,
+            aws_session_token=credentials.session_token,
+        )
+    client = session.client(
         "s3",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        aws_session_token=session_token,
         region_name=region,
         endpoint_url=endpoint_url,
         config=Config(
@@ -449,15 +500,42 @@ def publish(store: Store, archive: Path, record: CaptureRecordV1) -> None:
     )
 
 
+STATIC_DESTINATION_CREDENTIALS = (
+    "BACKUP_AWS_ACCESS_KEY_ID",
+    "BACKUP_AWS_SECRET_ACCESS_KEY",
+    "BACKUP_AWS_SESSION_TOKEN",
+)
+
+
+def destination_credentials() -> StaticCredentials | WebIdentity:
+    """Destination credentials; the application's AWS_* are never used as a fallback."""
+    mode = os.environ.get("BACKUP_AUTH_MODE", "static")
+    if mode == "static":
+        return StaticCredentials(
+            access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
+            secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
+            session_token=os.environ.get("BACKUP_AWS_SESSION_TOKEN"),
+        )
+    if mode == "web-identity":
+        for name in STATIC_DESTINATION_CREDENTIALS:
+            if os.environ.get(name):
+                raise BackupError(f"{name} cannot be used with BACKUP_AUTH_MODE={mode}")
+        return WebIdentity(
+            role_arn=required("BACKUP_AWS_ROLE_ARN"),
+            token_file=required("BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE"),
+            session_name=os.environ.get("BACKUP_AWS_ROLE_SESSION_NAME")
+            or "vaultwarden-backup",
+        )
+    raise BackupError("BACKUP_AUTH_MODE must be static or web-identity")
+
+
 def main(work: Path) -> float:
     """Capture the Vaultwarden recovery payload and return the next scheduled time."""
     destination = s3_store(
         bucket=required("BACKUP_BUCKET_NAME"),
         prefix=required("BACKUP_PREFIX"),
-        access_key=required("BACKUP_AWS_ACCESS_KEY_ID"),
-        secret_key=required("BACKUP_AWS_SECRET_ACCESS_KEY"),
         region=required("BACKUP_AWS_REGION"),
-        session_token=os.environ.get("BACKUP_AWS_SESSION_TOKEN"),
+        credentials=destination_credentials(),
         endpoint_url=os.environ.get("BACKUP_AWS_ENDPOINT_URL_S3"),
     )
     interval = positive_int("BACKUP_INTERVAL_SECONDS", 3600)
@@ -519,10 +597,12 @@ def main(work: Path) -> float:
     source_store = s3_store(
         bucket=required("BUCKET_NAME"),
         prefix="data",
-        access_key=required("AWS_ACCESS_KEY_ID"),
-        secret_key=required("AWS_SECRET_ACCESS_KEY"),
         region=required("AWS_REGION"),
-        session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        credentials=StaticCredentials(
+            access_key=required("AWS_ACCESS_KEY_ID"),
+            secret_key=required("AWS_SECRET_ACCESS_KEY"),
+            session_token=os.environ.get("AWS_SESSION_TOKEN"),
+        ),
         endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3"),
     )
     capture_files(
