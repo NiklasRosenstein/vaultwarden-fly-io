@@ -30,7 +30,7 @@ def flag(name: str, default: bool) -> bool:
 
 def integer(name: str, default: int, *, minimum: int = 0) -> int:
     value = env(name, str(default))
-    if not value.isdigit() or int(value) < minimum:
+    if not (value.isascii() and value.isdigit()) or int(value) < minimum:
         raise ConfigError(
             f'{name} must be an integer of at least {minimum}, got "{value}"'
         )
