@@ -3,17 +3,22 @@ title: How it works
 description: Where the data lives, what happens on start, and how backups are made.
 ---
 
-Vaultwarden keeps everything in a `/data` folder. A Fly.io machine without a volume loses that folder on every
-restart, so this image stores each part of it somewhere else.
+A Fly.io machine without a volume loses its disk on every restart. So everything Vaultwarden needs is either kept in
+the bucket or rebuilt on start.
 
 ## Where the data lives
 
-| Path | Where it really is |
-| --- | --- |
-| `/data/db.sqlite3` | Downloaded on start. Litestream uploads changes to `vaultwarden.db/` in the bucket. |
-| `/data/attachments`, `/data/sends`, `/data/icon_cache` | In the bucket's `data/` folder, mounted at `/mnt/s3` with GeeseFS. |
-| `/data/config.json` | Built from environment variables on every start. Read-only. |
-| `/data/rsa_key.pem` | Written from `VAULTWARDEN_RSA_PRIVATE_KEY` on every start. |
+| What | Path in the container | Kept where |
+| --- | --- | --- |
+| Database | `/data/db.sqlite3` (local disk) | Copied to `vaultwarden.db/` in the bucket by Litestream, and downloaded on start. |
+| Attachments | `/mnt/s3/attachments` | `data/attachments/` in the bucket. |
+| Sends | `/mnt/s3/sends` | `data/sends/` in the bucket. |
+| Icon cache | `/mnt/s3/icon_cache` | `data/icon_cache/` in the bucket. |
+| Settings | `/data/config.json` | Not kept. Built from environment variables on every start. |
+| RSA key | `/data/rsa_key.pem` | Not kept. Written from `VAULTWARDEN_RSA_PRIVATE_KEY` on every start. |
+
+`/mnt/s3` is the bucket's `data/` folder, mounted with GeeseFS. The generated `config.json` tells Vaultwarden to use
+these folders instead of its defaults under `/data`.
 
 ## What happens on start
 
