@@ -12,7 +12,7 @@ export default defineConfig({
 		starlight({
 			title: 'Vaultwarden on Fly.io',
 			description:
-				'Run Vaultwarden on Fly.io for about 2 USD a month, with Litestream replication, S3-backed attachments and encrypted recovery backups.',
+				'Run your own Vaultwarden password manager on Fly.io for about 2 USD a month, with all data stored safely in S3.',
 			logo: { src: './src/assets/logo.svg' },
 			favicon: '/favicon.svg',
 			social: [
@@ -33,18 +33,20 @@ export default defineConfig({
 			],
 			sidebar: [
 				{
-					label: 'Getting started',
-					items: ['getting-started/introduction', 'getting-started/installation'],
+					label: 'Get started',
+					items: [
+						'getting-started/introduction',
+						'getting-started/installation',
+						'guides/migration',
+					],
 				},
 				{
-					label: 'Guides',
-					items: [
-						'guides/migration',
-						'guides/backups',
-						'guides/recovery',
-						'guides/kubernetes',
-						'guides/aws-oidc',
-					],
+					label: 'Keep your data safe',
+					items: ['guides/backups', 'guides/recovery'],
+				},
+				{
+					label: 'Other setups',
+					items: ['guides/kubernetes', 'guides/aws-oidc'],
 				},
 				{
 					label: 'Reference',

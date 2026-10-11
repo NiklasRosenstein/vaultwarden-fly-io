@@ -5,21 +5,17 @@ description: Run the same image outside Fly.io, on Docker or Kubernetes, with an
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-The image is built for Fly.io, but nothing in it requires Fly.io. It runs anywhere a container can mount a FUSE
-filesystem, with any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, Tigris and others).
+The image also runs outside Fly.io, with any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, Tigris and others).
 
 ## Requirements
 
-- **FUSE.** GeeseFS mounts the bucket at `/mnt/s3`. The container needs the `/dev/fuse` device and the `SYS_ADMIN`
-  capability. Some hosts also need AppArmor relaxed for the container.
-- **Exactly one replica.** Litestream must be the only writer of the replica. Never run two containers against the
-  same bucket at the same time, not even briefly during an update.
-- **No persistent volume.** State lives in the bucket. The container filesystem may be thrown away at any time.
-- **`VAULTWARDEN_DOMAIN`.** On Fly.io it defaults to `https://<app>.fly.dev`. Elsewhere, always set it.
+- **FUSE access.** The container mounts the bucket as a folder. It needs the `/dev/fuse` device and the `SYS_ADMIN`
+  capability. Some hosts also need AppArmor turned off for the container.
+- **Only one container.** Never run two containers on the same bucket, not even for a moment during an update.
+- **No volume.** All data is in the bucket.
+- **Set `VAULTWARDEN_DOMAIN`.** Outside Fly.io there is no default.
 
-All other options are the same as on Fly.io. See the [configuration reference](../../reference/configuration/).
-To use an AWS S3 bucket with an IAM role instead of access keys, see [AWS S3 without access keys](../aws-oidc/).
-Vaultwarden listens on port `8080`.
+All other [settings](../../reference/configuration/) work the same. Vaultwarden listens on port `8080`.
 
 ## Docker
 
@@ -48,12 +44,12 @@ VAULTWARDEN_ADMIN_TOKEN=$argon2id$...
 `VAULTWARDEN_RSA_PRIVATE_KEY` spans several lines, which an env file can't hold. Pass it with
 `-e VAULTWARDEN_RSA_PRIVATE_KEY="$(cat rsa_key.pem)"`.
 
-Put a reverse proxy that terminates TLS in front of port `8080`. Set `VAULTWARDEN_IP_HEADER` to the header your proxy
-sets, for example `X-Forwarded-For`.
+Put a reverse proxy with HTTPS in front of port `8080`. Set `VAULTWARDEN_IP_HEADER` to the header your proxy sets,
+for example `X-Forwarded-For`.
 
 ## Kubernetes
 
-A `Deployment` with one replica and the `Recreate` strategy makes sure the old pod is gone before the new one starts.
+Use one replica and the `Recreate` strategy. This stops the old pod before the new one starts.
 
 <Tabs>
 <TabItem label="Deployment">
@@ -137,14 +133,10 @@ Expose it with your usual `Ingress` or `Gateway` and TLS setup.
 </TabItem>
 </Tabs>
 
-<Aside title="Avoiding a privileged container">
-`privileged: true` is the simplest way to get FUSE into a pod. If your cluster runs a device plugin that exposes
-`/dev/fuse`, request the device as a resource instead, and add only the `SYS_ADMIN` capability.
+<Aside title="Without a privileged container">
+If your cluster has a device plugin for `/dev/fuse`, request the device instead and add only the `SYS_ADMIN`
+capability.
 </Aside>
 
-**Restarts.** When the [S3 mount monitor](../../reference/architecture/#s3-mount-monitor) finds a broken mount, the
-container exits with status `1`, and the kubelet starts a fresh container that mounts the bucket again. No liveness
-probe is needed for this.
-
-**Backups.** The [scheduled backup worker](../backups/) works the same way. With a pod that always runs, backups
-happen on schedule.
+If the bucket mount breaks, the container exits and Kubernetes starts a new one. You don't need a liveness probe for
+this. See [S3 mount monitor](../../reference/architecture/#s3-mount-monitor).

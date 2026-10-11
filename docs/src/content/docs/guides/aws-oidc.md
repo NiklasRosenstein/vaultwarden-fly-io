@@ -3,36 +3,28 @@ title: AWS S3 without access keys
 description: Reach the application and backup buckets with temporary credentials from OIDC instead of long-lived access keys.
 ---
 
-By default the buckets are reached with static access keys, for example the ones `fly storage create` sets. If a
-bucket is in AWS S3, an IAM role can be used instead. The machine or pod presents an OIDC token, and AWS STS
-exchanges it for temporary credentials through
-[`AssumeRoleWithWebIdentity`](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html):
+Normally the app uses fixed access keys to reach its buckets. With AWS S3 you can avoid stored keys. Fly.io and
+Kubernetes give each machine or pod a signed identity token (an OIDC token). AWS trades that token for short-lived
+keys through an IAM role. The app renews them before they expire.
 
-```
-OIDC token (Fly.io machine or Kubernetes service account) → AWS STS → temporary AWS credentials → bucket
-```
-
-This works for the application bucket (`AWS_*` variables) and the [backup](../backups/) destination (the same
-variables with a `BACKUP_` prefix), independently of each other. Credentials are refreshed before they expire.
+You can do this for the app bucket (`AWS_*` variables), the [backup](../backups/) bucket (`BACKUP_AWS_*`), or both.
 
 :::note
-This only works with AWS S3. Other providers, including Tigris from `fly storage create`, don't accept AWS STS
-credentials.
+This only works with AWS S3, not with Tigris or other providers.
 :::
 
 ## Trust the token issuer
 
-Create an IAM role for each bucket, and let it be assumed with your platform's OIDC tokens. Use separate roles, so
-that the application can't delete its own backups.
+Create one IAM role per bucket. Use separate roles, so the app can't delete its own backups. Then tell AWS to trust
+tokens from your platform.
 
 ### On Fly.io
 
-Fly.io issues OIDC tokens to every machine (see [OpenID Connect](https://fly.io/docs/security/openid-connect/)).
+See Fly.io's [OpenID Connect](https://fly.io/docs/security/openid-connect/) docs.
 
-1. In AWS IAM, add an OpenID Connect identity provider with the URL `https://oidc.fly.io/<org-slug>` and the audience
+1. In AWS IAM, add an OpenID Connect identity provider. URL: `https://oidc.fly.io/<org-slug>`. Audience:
    `sts.amazonaws.com`.
-2. Give the role a trust policy for that provider. The token's subject is `<org-slug>:<app-name>:<machine-name>`, so
-   restrict it to your app:
+2. Give the role this trust policy. It only accepts tokens from your app:
 
    ```json
    {
@@ -54,14 +46,12 @@ Fly.io issues OIDC tokens to every machine (see [OpenID Connect](https://fly.io/
 ### On Kubernetes
 
 On EKS, use [IAM roles for service accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
-On other clusters, add the cluster's service account issuer to AWS IAM as an OpenID Connect identity provider. The
-trust policy's subject is `system:serviceaccount:<namespace>:<service-account>`, and the audience is
-`sts.amazonaws.com`.
+On other clusters, add the cluster's token issuer to AWS IAM as an OpenID Connect identity provider. In the trust
+policy, use the subject `system:serviceaccount:<namespace>:<service-account>` and the audience `sts.amazonaws.com`.
 
 ## Grant access to the bucket
 
-**Application bucket:** Litestream and GeeseFS delete objects (expired WAL segments, deleted attachments), so the
-role needs `DeleteObject` on the whole bucket:
+**App bucket:** the app deletes old database changes and deleted attachments, so it needs delete rights:
 
 ```json
 {
@@ -81,33 +71,28 @@ role needs `DeleteObject` on the whole bucket:
 }
 ```
 
-**Backup bucket:** grant the [destination permissions](../backups/#permissions) only. The worker never deletes.
+**Backup bucket:** grant only the [backup permissions](../backups/#permissions). No delete.
 
 ## Configure the variables
 
-| Application bucket | Backup bucket | Value |
+| App bucket | Backup bucket | Value |
 | --- | --- | --- |
 | `AWS_ROLE_ARN` | `BACKUP_AWS_ROLE_ARN` | `arn:aws:iam::<account>:role/<role>` |
 | `AWS_WEB_IDENTITY_TOKEN_FILE` | `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` | Path to the OIDC token. See below for Fly.io and EKS. |
-| `AWS_ROLE_SESSION_NAME` | `BACKUP_AWS_ROLE_SESSION_NAME` | Optional name shown in CloudTrail. |
+| `AWS_ROLE_SESSION_NAME` | `BACKUP_AWS_ROLE_SESSION_NAME` | Optional. Name shown in CloudTrail. |
 | `AWS_REGION` | `BACKUP_AWS_REGION` | Region of the bucket, for example `eu-central-1`. |
-| `AWS_ENDPOINT_URL_S3` | `BACKUP_AWS_ENDPOINT_URL_S3` | Unset, so that the AWS S3 endpoint of the region is used. |
+| `AWS_ENDPOINT_URL_S3` | `BACKUP_AWS_ENDPOINT_URL_S3` | Unset. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY` | Unset. |
 
-The two sets are separate: the backup worker never uses the application's `AWS_*` variables for its destination.
-They differ in a few details:
+Good to know:
 
-- **Access keys:** the AWS SDKs silently prefer `AWS_ACCESS_KEY_ID` over a role, so the application bucket keeps
-  using the keys until you remove them. For the backup bucket, setting both is an error.
-- **Token file:** read again on every refresh, so tokens rotated in place keep working.
-  - *Fly.io, application bucket:* setting `AWS_ROLE_ARN` makes Fly.io write a fresh token to `/.fly/oidc_token`
-    every few minutes and set `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME`. The entrypoint waits up to
-    30 seconds for the file to appear after the machine starts.
-  - *Fly.io, backup bucket:* leave `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` unset. The worker requests a token from the
-    machine API for each refresh.
-  - *EKS:* annotating the service account sets `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` in the pod. For the
-    backup bucket, point `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` at the same file.
-  - *Other clusters:* project a service account token into the pod (see below).
+- **Remove the access keys.** If `AWS_ACCESS_KEY_ID` is still set, the app bucket keeps using it and ignores the
+  role. For the backup bucket, setting both is an error.
+- **Where the token comes from:**
+  - *Fly.io:* Fly.io writes the token for the app bucket for you once `AWS_ROLE_ARN` is set. For the backup bucket,
+    leave `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` unset; the app asks Fly.io for a token.
+  - *EKS:* the token file is set up for you. Point `BACKUP_AWS_WEB_IDENTITY_TOKEN_FILE` at the same file.
+  - *Other clusters:* mount a service account token into the pod (see below).
 
 ### Example: Fly.io
 
@@ -122,8 +107,8 @@ BACKUP_AWS_ROLE_ARN = "arn:aws:iam::<account>:role/vaultwarden-backup"
 BACKUP_AWS_REGION = "eu-central-1"
 ```
 
-Then remove the secrets that `fly storage create` set for the Tigris bucket. Secrets take precedence over `[env]`,
-so a leftover `AWS_REGION=auto` would break the AWS endpoint:
+Then remove the Tigris secrets that `fly storage create` set. Secrets win over `[env]`, so they would break the
+setup:
 
 ```sh
 fly secrets unset --app <app_name> \
@@ -161,5 +146,5 @@ spec:
 
 ## Recovery
 
-Recovery archives record `AWS_ROLE_ARN`, `AWS_ROLE_SESSION_NAME` and `AWS_REGION`, but not the token file, which the
-recovery host provides. The `BACKUP_*` settings aren't recorded.
+Backup archives store `AWS_ROLE_ARN`, `AWS_ROLE_SESSION_NAME` and `AWS_REGION`. The server you restore to must
+provide its own token.

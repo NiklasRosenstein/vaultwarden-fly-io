@@ -1,19 +1,19 @@
 ---
-title: Recovery
-description: Restore a vault from an encrypted recovery archive.
+title: Restore from a backup
+description: Restore your vault from an encrypted backup archive.
 ---
 
 import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
-You need two things that must be available **without** the application or its secrets manager: the recovery
-private key (`recovery-key.txt`) and access to the backup destination.
+You need two things, both stored **outside** the app: your recovery key (`recovery-key.txt`) and access to the backup
+bucket.
 
 <Steps>
 
-1. **Pick an archive.** Choose a completion manifest under `<prefix>/completed/`, download the archive it references,
-   and check its size and SHA-256 against the manifest.
+1. **Pick a backup.** Open a JSON file under `<prefix>/completed/`. Download the archive it names. Check that its size
+   and SHA-256 match the JSON file.
 
-2. **Decrypt and extract** into a private directory:
+2. **Decrypt and unpack it** into a private folder:
 
    ```sh
    umask 077
@@ -22,41 +22,36 @@ private key (`recovery-key.txt`) and access to the backup destination.
    tar -xzf backup.tar.gz -C recovered
    ```
 
-3. **Inspect the contents.**
+3. **Look at the contents.**
 
    <FileTree>
    - recovered/vaultwarden/
-     - db.sqlite3 standalone database
-     - manifest.json capture metadata, SHA-256/size inventory, `missing_files`
+     - db.sqlite3 the database
+     - manifest.json what is in the archive, and `missing_files`
      - files/
        - attachments/
        - sends/
      - recovery/
-       - environment.json image inputs, incl. storage credentials, age identity, domain and RSA key
-       - config.json captured admin configuration
-       - rsa_key.pem signing key
+       - environment.json the app's settings, including keys and bucket credentials
+       - config.json Vaultwarden's settings at backup time
+       - rsa_key.pem the signing key
    </FileTree>
 
-4. **Validate** the SQLite database and the file inventory. For a degraded archive, look at `missing_files`. Those
-   files aren't in this archive, although their database records are. Recover them from another archive or source
-   if you can.
+4. **Check for missing files.** If `missing_files` in `manifest.json` is not empty, those files are not in this
+   archive. Try to get them from an older archive.
 
-5. **Restore**, following the [migration guide](../migration/):
-   - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=import-db.sqlite`. A standard Vaultwarden
-     deployment can also use the file directly.
-   - Upload `files/attachments/` and `files/sends/` under `data/` in a **fresh** bucket.
-   - Use the Vaultwarden version recorded in the manifest first, and keep the same domain and signing key.
-   - Update the storage credentials and endpoints for the new bucket. The captured source credentials may have
-     expired or been revoked.
-   - Settings in `recovery/config.json` that were changed in the admin panel must be set again as environment
-     options. The image regenerates `config.json` on every start.
+5. **Restore** with the steps from [Move from another server](../migration/):
+   - Use a **new** bucket.
+   - Upload `db.sqlite3` as `import-db.sqlite` and deploy once with `IMPORT_DATABASE=import-db.sqlite`.
+   - Upload `files/attachments/` and `files/sends/` to `data/` in the bucket.
+   - Use the same Vaultwarden version (see `manifest.json`), domain and RSA key.
+   - Set new bucket credentials. The old ones in `environment.json` may no longer work.
 
-6. **Verify in isolation.** Log in and download an attachment before you switch traffic over or turn scheduled
-   backups back on. Keep the original writer fenced off, and test recoveries in a separate bucket.
+6. **Test before you switch.** Log in and download an attachment. Only then send users to it and turn backups back
+   on. Make sure the old server is stopped.
 
 </Steps>
 
 <Aside>
-The archive contains the application's recovery secrets. It is not an OpenBao snapshot. Backup destination
-credentials, backup settings and one-time import/idle flags are deliberately left out.
+The archive does not contain the backup settings or the backup credentials.
 </Aside>
