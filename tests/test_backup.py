@@ -206,7 +206,7 @@ class BackupTests(unittest.TestCase):
         self.destination = backup.Store(
             cast("S3Client", self.destination_client),
             "backups",
-            "kalix.cluster.rosenstein.app/vaultwarden",
+            "example.com/vaultwarden",
         )
         self.env = patch.dict(
             os.environ,
@@ -221,7 +221,7 @@ class BackupTests(unittest.TestCase):
                 "BACKUP_AWS_SESSION_TOKEN": "destination-session",
                 "BACKUP_AWS_REGION": "eu-west-1",
                 "BACKUP_BUCKET_NAME": "backups",
-                "BACKUP_PREFIX": "kalix.cluster.rosenstein.app/vaultwarden",
+                "BACKUP_PREFIX": "example.com/vaultwarden",
                 "BUCKET_NAME": "source",
                 "AWS_ACCESS_KEY_ID": "source-key",
                 "AWS_SECRET_ACCESS_KEY": "source-secret",
@@ -522,7 +522,7 @@ class BackupTests(unittest.TestCase):
             destination,
             {
                 "bucket": "backups",
-                "prefix": "kalix.cluster.rosenstein.app/vaultwarden",
+                "prefix": "example.com/vaultwarden",
                 "region": "eu-west-1",
                 "credentials": backup.StaticCredentials(
                     "destination-key", "destination-secret", "destination-session"
