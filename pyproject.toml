@@ -2,7 +2,7 @@
 name = "vaultwarden-fly-io"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["boto3==1.43.6", "pydantic>=2.10,<3", "typing-extensions>=4.12"]
+dependencies = ["boto3==1.43.111", "pydantic>=2.10,<3", "typing-extensions>=4.12"]
 
 [dependency-groups]
 dev = ["boto3-stubs[s3]==1.43.6", "mypy==1.19.1", "ruff==0.16.8"]
