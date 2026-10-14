@@ -150,8 +150,8 @@ def vaultwarden_config() -> dict[str, object]:
         "password_iterations": positive_int("VAULTWARDEN_PASSWORD_ITERATIONS", 600000),
         "password_hints_allowed": flag("VAULTWARDEN_PASSWORD_HINTS_ALLOWED", True),
         "show_password_hint": flag("VAULTWARDEN_SHOW_PASSWORD_HINT", False),
-        # An empty token disables the admin page.
-        "admin_token": required("VAULTWARDEN_ADMIN_TOKEN", allow_empty=True),
+        # An empty or unset token disables the admin page.
+        "admin_token": env("VAULTWARDEN_ADMIN_TOKEN"),
         "invitation_org_name": env("VAULTWARDEN_INVITATION_ORG_NAME", "Vaultwarden"),
         "ip_header": env("VAULTWARDEN_IP_HEADER", "X-Real-IP"),
         "icon_redirect_code": 302,
@@ -168,6 +168,10 @@ def vaultwarden_config() -> dict[str, object]:
         "_enable_duo": flag("VAULTWARDEN_ENABLE_DUO", False),
         "_enable_smtp": smtp,
         "_enable_email_2fa": flag("VAULTWARDEN_ENABLE_EMAIL_2FA", smtp),
+        "email_2fa_enforce_on_verified_invite": flag(
+            "VAULTWARDEN_EMAIL_2FA_ENFORCE_ON_VERIFIED_INVITE", False
+        ),
+        "email_2fa_auto_fallback": flag("VAULTWARDEN_EMAIL_2FA_AUTO_FALLBACK", False),
     }
     if smtp:
         config |= {
