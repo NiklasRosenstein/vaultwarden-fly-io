@@ -67,6 +67,8 @@ class ConfigTests(EntrypointTestCase):
         self.assertEqual(config["admin_token"], "admin")
         self.assertIs(config["signups_allowed"], True)
         self.assertIs(config["_enable_email_2fa"], False)
+        self.assertIs(config["email_2fa_enforce_on_verified_invite"], False)
+        self.assertIs(config["email_2fa_auto_fallback"], False)
         self.assertEqual(config["password_iterations"], 600000)
         self.assertEqual(
             config["attachments_folder"], f"{entrypoint.S3_MOUNT}/attachments"
@@ -91,12 +93,16 @@ class ConfigTests(EntrypointTestCase):
             VAULTWARDEN_SMTP_USERNAME="user",
             VAULTWARDEN_SMTP_PASSWORD="pass",
             VAULTWARDEN_SMTP_PORT="587",
+            VAULTWARDEN_EMAIL_2FA_ENFORCE_ON_VERIFIED_INVITE="true",
+            VAULTWARDEN_EMAIL_2FA_AUTO_FALLBACK="true",
         )
         config = entrypoint.vaultwarden_config()
         self.assertIs(config["signups_allowed"], False)
         self.assertEqual(config["password_iterations"], 700000)
         self.assertEqual(config["invitation_org_name"], 'Quote " and \\ backslash')
         self.assertEqual(config["smtp_port"], 587)
+        self.assertIs(config["email_2fa_enforce_on_verified_invite"], True)
+        self.assertIs(config["email_2fa_auto_fallback"], True)
         # Email 2FA follows SMTP unless set explicitly.
         self.assertIs(config["_enable_email_2fa"], True)
         os.environ["VAULTWARDEN_ENABLE_EMAIL_2FA"] = "false"
@@ -107,13 +113,14 @@ class ConfigTests(EntrypointTestCase):
             "VAULTWARDEN_SIGNUPS_ALLOWED": "yes",
             "VAULTWARDEN_PASSWORD_ITERATIONS": "0",
             "VAULTWARDEN_SIGNUPS_VERIFY_RESEND_LIMIT": "-1",
+            "VAULTWARDEN_EMAIL_2FA_AUTO_FALLBACK": "1",
         }
         for name, value in cases.items():
             with self.subTest(name=name), patch.dict(os.environ, {name: value}):
                 with self.assertRaisesRegex(entrypoint.StartupError, name):
                     entrypoint.vaultwarden_config()
 
-    def test_empty_admin_token_disables_admin_page(self) -> None:
+    def test_unset_admin_token_disables_admin_page(self) -> None:
         os.environ.update(
             VAULTWARDEN_ADMIN_TOKEN="",
             VAULTWARDEN_ENABLE_SMTP="true",
@@ -126,8 +133,7 @@ class ConfigTests(EntrypointTestCase):
         self.assertEqual(config["admin_token"], "")
         self.assertEqual(config["smtp_username"], "")
         del os.environ["VAULTWARDEN_ADMIN_TOKEN"]
-        with self.assertRaisesRegex(entrypoint.StartupError, "VAULTWARDEN_ADMIN_TOKEN"):
-            entrypoint.vaultwarden_config()
+        self.assertEqual(entrypoint.vaultwarden_config()["admin_token"], "")
 
     def test_required_values(self) -> None:
         cases: dict[str, dict[str, str]] = {

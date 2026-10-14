@@ -19,7 +19,7 @@ These are the settings most people change. Each one is also listed in its sectio
 | Variable | Why you would change it |
 | --- | --- |
 | `VAULTWARDEN_DOMAIN` | You use your own domain. |
-| `VAULTWARDEN_ADMIN_TOKEN` | Required. Password for the admin panel. |
+| `VAULTWARDEN_ADMIN_TOKEN` | Password for the admin panel. Without it, the admin panel is off. |
 | `VAULTWARDEN_SIGNUPS_ALLOWED` | Set to `false` once your accounts exist. |
 | `VAULTWARDEN_ENABLE_SMTP` | You want invitation and verification emails. See [Email](#email). |
 | `VAULTWARDEN_IP_HEADER` | You use Cloudflare or another proxy. |
@@ -49,7 +49,7 @@ same name, with `VAULTWARDEN_` in front.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `VAULTWARDEN_ADMIN_TOKEN` | required | Admin panel password, hashed. Create it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Set it empty to turn the admin panel off. |
+| `VAULTWARDEN_ADMIN_TOKEN` | empty | Admin panel password, hashed. Create it with `docker run -it --rm ghcr.io/dani-garcia/vaultwarden /vaultwarden hash`. Leave it unset or empty to turn the admin panel off. |
 | `VAULTWARDEN_RSA_PRIVATE_KEY` | required | Key that signs logins. Create it with `openssl genrsa 2048`. Changing it logs everyone out. |
 | `VAULTWARDEN_DOMAIN` | `https://${FLY_APP_NAME}.fly.dev` | Public address of your vault. |
 | `VAULTWARDEN_LOG_LEVEL` | `info` | How much to log. |
@@ -79,6 +79,8 @@ same name, with `VAULTWARDEN_` in front.
 | --- | --- | --- |
 | `VAULTWARDEN_DISABLE_2FA_REMEMBER` | `false` | Turn off "remember me" for two-factor logins. |
 | `VAULTWARDEN_ENABLE_EMAIL_2FA` | value of `VAULTWARDEN_ENABLE_SMTP` | Allow email codes as a second factor. |
+| `VAULTWARDEN_EMAIL_2FA_ENFORCE_ON_VERIFIED_INVITE` | `false` | Turn on email two-factor login for users who accept an invitation and have no other second factor. |
+| `VAULTWARDEN_EMAIL_2FA_AUTO_FALLBACK` | `false` | Turn on email two-factor login for users whose last other second factor is removed. |
 | `VAULTWARDEN_ENABLE_DUO` | `false` | Allow Duo as a second factor. |
 | `VAULTWARDEN_ENABLE_YUBICO` | `false` | Allow YubiKey OTP as a second factor. |
 | `VAULTWARDEN_YUBICO_CLIENT_ID` | required for Yubico | Yubico client ID. |
