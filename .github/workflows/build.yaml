@@ -38,6 +38,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Checkout code
@@ -81,6 +84,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           push: ${{ steps.should_push.outputs.push == 'true' }}
@@ -90,3 +94,11 @@ jobs:
           context: vaultwarden-fly-io
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest build provenance
+        if: steps.should_push.outputs.push == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/niklasrosenstein/vaultwarden-fly-io
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
