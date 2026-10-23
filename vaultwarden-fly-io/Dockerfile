@@ -9,7 +9,7 @@ RUN arch=$(cat /tmp/arch) &&\
 
 FROM fetcher AS geesefs
 RUN arch=$(cat /tmp/arch) &&\
-    wget https://github.com/yandex-cloud/geesefs/releases/download/v0.41.3/geesefs-linux-${arch} -O geesefs && \
+    wget https://github.com/yandex-cloud/geesefs/releases/download/v0.43.8/geesefs-linux-${arch} -O geesefs && \
     chmod +x geesefs
 
 FROM ghcr.io/dani-garcia/vaultwarden:1.37.4-alpine
