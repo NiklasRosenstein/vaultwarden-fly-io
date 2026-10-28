@@ -12,6 +12,7 @@
             "matchDatasources": ["docker"],
             "matchPackageNames": ["ghcr.io/dani-garcia/vaultwarden"],
             "addLabels": ["vaultwarden-update"],
+            "automerge": true,
             "dependencyDashboardApproval": false
         },
         {
