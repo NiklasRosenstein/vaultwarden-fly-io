@@ -2,7 +2,7 @@
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": ["config:recommended"],
     "rebaseWhen": "conflicted",
-    "automerge": true,
+    "automerge": false,
     "automergeType": "pr",
     "platformAutomerge": true,
     "dependencyDashboard": true,
@@ -12,10 +12,18 @@
             "matchDatasources": ["docker"],
             "matchPackageNames": ["ghcr.io/dani-garcia/vaultwarden"],
             "addLabels": ["vaultwarden-update"],
+            "automerge": true,
             "dependencyDashboardApproval": false
         },
         {
-            "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+            "matchUpdateTypes": ["minor", "pin", "digest"],
+            "automerge": true,
+            "dependencyDashboardApproval": false
+        },
+        {
+            "matchUpdateTypes": ["patch"],
+            "groupName": "all patch updates",
+            "groupSlug": "all-patch-updates",
             "automerge": true,
             "dependencyDashboardApproval": false
         },
