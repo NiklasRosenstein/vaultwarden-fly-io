@@ -364,10 +364,10 @@ class MonitorTests(EntrypointTestCase):
         # The process name comes from the executable's file name.
         name = "zz-monitor-test"
         executable = self.root / name
-        executable.symlink_to(
-            subprocess.check_output(["which", "sleep"], text=True).strip()
-        )
-        running = subprocess.Popen([executable, "60"])
+        # Symlink the Python interpreter rather than `sleep`: multicall coreutils
+        # (uutils) renames its own process, which hides the symlink's name.
+        executable.symlink_to(sys.executable)
+        running = subprocess.Popen([executable, "-c", "import time; time.sleep(60)"])
         self.addCleanup(running.wait)
         self.addCleanup(running.kill)
         self.assertIn(name, entrypoint.process_names())
